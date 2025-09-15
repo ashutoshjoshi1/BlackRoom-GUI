@@ -509,6 +509,46 @@ class SpectroApp(tk.Tk):
         except:
             pass
 
+    def on_close(self):
+        # Stop loops if these exist
+        for name in ("stop_live", "stop_measurement", "stop_updates", "shutdown_threads"):
+            try:
+                if hasattr(self, name):
+                    getattr(self, name)()
+            except Exception:
+                pass
+
+        # Turn off lasers if a controller is present
+        for attr in ("laser_controller", "lasers", "laser", "cube", "obis"):
+            ctl = getattr(self, attr, None)
+            if ctl is None:
+                continue
+            for m in ("all_off", "turn_all_off", "power_off_all", "shutdown", "close"):
+                try:
+                    if hasattr(ctl, m):
+                        getattr(ctl, m)()
+                        break
+                except Exception:
+                    pass
+
+        # Disconnect spectrometer if present
+        for spec_attr in ("spectrometer", "spec", "avantes", "ava"):
+            spec = getattr(self, spec_attr, None)
+            if spec is None:
+                continue
+            for m in ("close", "disconnect", "shutdown", "stop"):
+                try:
+                    if hasattr(spec, m):
+                        getattr(spec, m)()
+                        break
+                except Exception:
+                    pass
+
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
 
 
     def _build_ui(self):
