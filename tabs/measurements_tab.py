@@ -1,11 +1,54 @@
 # Auto-generated from gui.py by splitter
-from typing import Any
+from typing import Any, List, Optional, Tuple
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import numpy as np
-import os, time
+import os, time, serial
+from datetime import datetime
+import threading
+from avantes_spectrometer import Avantes_Spectrometer
+from scipy.signal import find_peaks
+from typing import Dict
+import json
+import traceback
+import sys
+from matplotlib.widgets import Cursor
+from matplotlib.backend_bases import MouseEvent
+
+# Define constants
+DEFAULT_ALL_LASERS = ["405", "445", "488", "517", "532", "377", "Hg_Ar"]
+OBIS_LASER_MAP = {"405": 5, "445": 4, "488": 3}
+MAX_IT_ADJUST_ITERS = 1000
+SAT_THRESH = 65400
+N_SIG = 50
+N_DARK = 50
+DEFAULT_START_IT = {
+    "532": 5,
+    "517": 80,
+    "Hg_Ar": 10,
+    "default": 2.4
+}
+
+# Define additional constants
+DEFAULT_LASER_POWERS = {
+    "405": 0.005,
+    "445": 0.003,
+    "488": 0.03,
+    "517": 0.02,
+    "532": 0.01,
+    "377": 0.01,
+    "Hg_Ar": 0.01
+}
+DEFAULT_COM_PORTS = {
+    "OBIS": "COM10",
+    "CUBE": "COM1",
+    "RELAY": "COM11"
+}
+SETTINGS_FILE = "settings.json"
+KNOWN_HG_AR_NM = [289.36, 296.73, 302.15, 313.16, 334.19, 365.01, 404.66, 407.78, 435.84, 507.3, 546.08]
+IB_REGION_HALF = 20
 
 def build(app):
     def _build_measure_tab(self):
@@ -75,6 +118,68 @@ def build(app):
         app.meas_canvas.draw()
         app.meas_canvas.get_tk_widget().pack(fill="both", expand=True)
         NavigationToolbar2Tk(app.meas_canvas, bot)
+
+        # Enhance measurement plots with interactive features and customization
+        class InteractivePlot:
+            def __init__(self, ax):
+                self.ax = ax
+                self.cursor = Cursor(ax, useblit=True, color='red', linewidth=1)
+                self.zoom_active = False
+                self.pan_active = False
+
+            def toggle_zoom(self, event: MouseEvent):
+                if event.key == 'z':
+                    self.zoom_active = not self.zoom_active
+                    self.ax.figure.canvas.mpl_disconnect('scroll_event')
+                    if self.zoom_active:
+                        self.ax.figure.canvas.mpl_connect('scroll_event', self.zoom)
+
+            def toggle_pan(self, event: MouseEvent):
+                if event.key == 'p':
+                    self.pan_active = not self.pan_active
+                    self.ax.figure.canvas.mpl_disconnect('motion_notify_event')
+                    if self.pan_active:
+                        self.ax.figure.canvas.mpl_connect('motion_notify_event', self.pan)
+
+            def zoom(self, event):
+                base_scale = 1.1
+                cur_xlim = self.ax.get_xlim()
+                cur_ylim = self.ax.get_ylim()
+                xdata = event.xdata
+                ydata = event.ydata
+                if event.button == 'up':
+                    scale_factor = base_scale
+                elif event.button == 'down':
+                    scale_factor = 1 / base_scale
+                else:
+                    scale_factor = 1
+                new_xlim = [xdata - (xdata - cur_xlim[0]) / scale_factor,
+                            xdata + (cur_xlim[1] - xdata) / scale_factor]
+                new_ylim = [ydata - (ydata - cur_ylim[0]) / scale_factor,
+                            ydata + (cur_ylim[1] - ydata) / scale_factor]
+                self.ax.set_xlim(new_xlim)
+                self.ax.set_ylim(new_ylim)
+                self.ax.figure.canvas.draw()
+
+            def pan(self, event):
+                if event.button == 1:  # Left mouse button
+                    dx = event.xdata - self.ax.get_xlim()[0]
+                    dy = event.ydata - self.ax.get_ylim()[0]
+                    self.ax.set_xlim(self.ax.get_xlim()[0] + dx, self.ax.get_xlim()[1] + dx)
+                    self.ax.set_ylim(self.ax.get_ylim()[0] + dy, self.ax.get_ylim()[1] + dy)
+                    self.ax.figure.canvas.draw()
+
+        def customize_plot(ax, grid=True, color='blue'):
+            ax.grid(grid)
+            for line in ax.get_lines():
+                line.set_color(color)
+
+        interactive_plot = InteractivePlot(app.meas_ax)
+        customize_plot(app.meas_ax, grid=True, color='green')
+
+        # Connect interactive features to events
+        app.meas_ax.figure.canvas.mpl_connect('key_press_event', interactive_plot.toggle_zoom)
+        app.meas_ax.figure.canvas.mpl_connect('key_press_event', interactive_plot.toggle_pan)
 
     def run_all_selected(self):
         if not app.spec:
@@ -611,7 +716,7 @@ def build(app):
         power_group = ttk.LabelFrame(frame, text="Laser Power Configuration")
         power_group.pack(fill="x", padx=6, pady=6)
 
-        app.power_entries: Dict[str, ttk.Entry] = {}
+        app.power_entries = {}
         row = 0
         for tag in ["405", "445", "488", "640", "377", "517", "532", "Hg_Ar"]:
             ttk.Label(power_group, text=f"{tag} nm power:").grid(row=row, column=0, sticky="e", padx=4, pady=2)
@@ -805,6 +910,118 @@ def build(app):
             app.destroy()
 
 
-    if __name__ == "__main__":
-    app = SpectroApp()
-    app.mainloop()
+    # Laser control setup
+    COM_PORTS = {
+        "OBIS": "COM10",
+        "CUBE": "COM1"
+    }
+
+    obis_ser = serial.Serial(COM_PORTS["OBIS"], baudrate=9600, timeout=1)
+
+    def send_obis_cmd(cmd):
+        obis_ser.write((cmd + "\r\n").encode())
+        time.sleep(0.2)
+        response = obis_ser.readlines()
+        return [r.decode().strip() for r in response]
+
+    def obis_laser_on(channel):
+        send_obis_cmd(f"SOUR{channel}:AM:STAT ON")
+
+    def obis_laser_off(channel):
+        send_obis_cmd(f"SOUR{channel}:AM:STAT OFF")
+
+    def set_obis_power(channel, pwr):
+        send_obis_cmd(f"SOUR{channel}:POW:LEV:IMM:AMPL {pwr:.3f}")
+
+    cube_ser = serial.Serial(
+        port=COM_PORTS['CUBE'],
+        baudrate=19200,
+        parity=serial.PARITY_NONE,
+        stopbits=serial.STOPBITS_ONE,
+        bytesize=serial.EIGHTBITS,
+        timeout=1
+    )
+
+    def send_cube_cmd(cmd):
+        full_cmd = (cmd + '\r').encode('utf-8')
+        cube_ser.write(full_cmd)
+        time.sleep(1)
+        return cube_ser.read_all().decode('utf-8', errors='ignore').strip()
+
+    # Auto-IT logic
+    TARGET_LOW = 60000
+    TARGET_HIGH = 65000
+    IT_MIN = 0.2
+    IT_MAX = 3000
+    IT_STEP_UP = 0.3
+    IT_STEP_DOWN = 0.1
+
+    # Function to adjust integration time
+    def adjust_integration_time(current_peak, current_it):
+        if current_peak < TARGET_LOW:
+            return min(current_it + IT_STEP_UP, IT_MAX)
+        elif current_peak > TARGET_HIGH:
+            return max(current_it - IT_STEP_DOWN, IT_MIN)
+        return current_it
+
+    # Example usage in measurement sequence
+    def measure_sequence(tags, start_it):
+        spec = Avantes_Spectrometer()
+        for tag in tags:
+            obis_laser_on(tag)
+            current_it = start_it or IT_MIN
+            for _ in range(10):  # Example loop for measurements
+                data = spec.measure(current_it)
+                peak = max(data)
+                current_it = adjust_integration_time(peak, current_it)
+            obis_laser_off(tag)
+
+# Implement placeholder functions
+
+def normalized_lsf_from_df(df, tag):
+    """
+    Extract and normalize the Line Spread Function (LSF) from the DataFrame.
+    """
+    if tag not in df.columns:
+        raise ValueError(f"Tag '{tag}' not found in DataFrame columns.")
+    lsf = df[tag].values
+    lsf -= np.min(lsf)  # Ensure non-negative
+    if np.max(lsf) > 0:
+        lsf /= np.max(lsf)  # Normalize to [0, 1]
+    return lsf
+
+def best_ordered_linear_match(peaks, known_lines, min_points=4):
+    """
+    Match peaks to known spectral lines using a linear model.
+    """
+    if len(peaks) < min_points or len(known_lines) < min_points:
+        return None
+    # Simple linear regression (least squares)
+    coeffs = np.polyfit(peaks[:min_points], known_lines[:min_points], 1)
+    a, b = coeffs
+    # Calculate RMSE
+    predicted = np.polyval(coeffs, peaks[:min_points])
+    rmse = np.sqrt(np.mean((predicted - known_lines[:min_points])**2))
+    return rmse, a, b, peaks[:min_points], known_lines[:min_points]
+
+def stray_light_metrics(lsf, peak_pix, ib_half):
+    """
+    Calculate stray light metrics based on the LSF and peak pixel.
+    """
+    if peak_pix - ib_half < 0 or peak_pix + ib_half >= len(lsf):
+        raise ValueError("Insufficient data around peak for stray light calculation.")
+    in_band = np.sum(lsf[peak_pix - ib_half:peak_pix + ib_half + 1])
+    out_band = np.sum(lsf) - in_band
+    stray_light_ratio = out_band / in_band if in_band > 0 else np.inf
+    return {"in_band": in_band, "out_band": out_band, "stray_light_ratio": stray_light_ratio}
+
+def compute_fwhm(xpix, y):
+    """
+    Compute the Full Width at Half Maximum (FWHM) of a signal.
+    """
+    half_max = np.max(y) / 2.0
+    indices = np.where(y >= half_max)[0]
+    if len(indices) < 2:
+        return 0.0
+    fwhm = xpix[indices[-1]] - xpix[indices[0]]
+    return fwhm
