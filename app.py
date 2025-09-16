@@ -1264,6 +1264,58 @@ class SpectroApp(tk.Tk):
             self.sn = getattr(ava, "sn", "Unknown")
             self.spec_status.config(text=f"Connected: {self.sn}", foreground="green")
             messagebox.showinfo("Spectrometer", f"Connected to spectrometer {self.sn}")
+        except Exception as e:
+            self._post_error("Connect Spectrometer", e)
+            dll = self.dll_entry.get().strip()
+            if not dll or not os.path.isfile(dll):
+                raise RuntimeError("Please select a valid avaspecx64.dll")
+            # init wrapper
+            ava = Avantes_Spectrometer()
+            ava.dll_path = dll
+            ava.alias = "Ava1"
+            ava.npix_active = 2048
+            ava.debug_mode = 1
+            ava.initialize_spec_logger()
+
+            res = ava.load_spec_dll()
+            if res != "OK":
+                raise RuntimeError(f"load_spec_dll returned: {res}")
+            res = ava.initialize_dll()
+            # enumerate
+            res, ndev = ava.get_number_of_devices()
+            if res != "OK" or ndev <= 0:
+                raise RuntimeError("No Avantes devices detected.")
+            res, infos = ava.get_all_devices_info(ndev)
+            sers = []
+            for idx in range(ndev):
+                ident = getattr(infos, f"a{idx}")
+                sn = ident.SerialNumber
+                if isinstance(sn, (bytes, bytearray)):
+                    sn = sn.decode('utf-8', errors='ignore')
+                sers.append(sn)
+            if ndev > 1:
+                choices = "\n".join(f"{k+1}: {s}" for k, s in enumerate(sers))
+                selection = simpledialog.askinteger(
+                    "Select Spectrometer",
+                    f"Multiple spectrometers detected:\n{choices}\nEnter device number:",
+                    parent=self
+                )
+                if selection is None:
+                    messagebox.showinfo("Spectrometer", "Spectrometer selection cancelled.")
+                    return
+                if 1 <= selection <= len(sers):
+                    ava.sn = sers[selection-1]
+                else:
+                    messagebox.showwarning("Spectrometer", "Invalid selection. Connecting to first device.")
+                    ava.sn = sers[0]
+            elif sers:
+                ava.sn = sers[0]
+            ava.connect()
+            self.spec = ava
+            self.sn = getattr(ava, "sn", "Unknown")
+            self.spec_status.config(text=f"Connected: {self.sn}", foreground="green")
+            messagebox.showinfo("Spectrometer", f"Connected to spectrometer {self.sn}")
+        
 
     def disconnect_spectrometer(self):
         try:
