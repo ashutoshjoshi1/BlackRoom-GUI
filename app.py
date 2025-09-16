@@ -531,7 +531,7 @@ class SpectroApp(tk.Tk):
         self._build_setup_tab()
 
     # ------------------ Live View Tab --------------------
-     def _build_live_tab(self):
+    def _build_live_tab(self):
          from tabs.live_view_tab import build as _build
          _build(self)
 
@@ -702,7 +702,7 @@ class SpectroApp(tk.Tk):
             self._post_error(f"Laser {tag}", e)
 
     # ------------------ Measurements Tab -----------------
-     def _build_measure_tab(self):
+    def _build_measure_tab(self):
          from tabs.measurements_tab import build as _build
          _build(self)
 
@@ -979,7 +979,7 @@ class SpectroApp(tk.Tk):
             messagebox.showerror("Save CSV", str(e))
 
     # ------------------ Analysis Tab --------------------
-     def _build_analysis_tab(self):
+    def _build_analysis_tab(self):
          from tabs.analysis_tab import build as _build
          _build(self)
     def start_analysis_from_measure(self):
@@ -1146,7 +1146,7 @@ class SpectroApp(tk.Tk):
             messagebox.showerror("Export Summary", str(e))
 
     # ------------------ Setup Tab -----------------------
-     def _build_setup_tab(self):
+    def _build_setup_tab(self):
          from tabs.setup_tab import build as _build
          _build(self)
 

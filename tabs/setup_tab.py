@@ -58,15 +58,15 @@ def build(app):
         app.power_entries: Dict[str, ttk.Entry] = {}
         row = 0
         for tag in ["405", "445", "488", "640", "377", "517", "532", "Hg_Ar"]:
-       ttk.Label(power_group, text=f"{tag} nm power:").grid(row=row, column=0, sticky="e", padx=4, pady=2)
-       e = ttk.Entry(power_group, width=12)
-       e.insert(0, str(DEFAULT_LASER_POWERS.get(tag, 0.01)))
-       e.grid(row=row, column=1, sticky="w", padx=4, pady=2)
-       app.power_entries[tag] = e
-       row += 1
+            ttk.Label(power_group, text=f"{tag} nm power:").grid(row=row, column=0, sticky="e", padx=4, pady=2)
+e = ttk.Entry(power_group, width=12)
+e.insert(0, str(DEFAULT_LASER_POWERS.get(tag, 0.01)))
+e.grid(row=row, column=1, sticky="w", padx=4, pady=2)
+app.power_entries[tag] = e
+row += 1
 
         # Save/Load
-        save_group = ttk.Frame(frame)
-        save_group.pack(fill="x", padx=6, pady=8)
-        ttk.Button(save_group, text="Save Settings", command=app.save_settings).pack(side="left")
-        ttk.Button(save_group, text="Load Settings", command=app.load_settings_into_ui).pack(side="left", padx=6)
+save_group = ttk.Frame(frame)
+save_group.pack(fill="x", padx=6, pady=8)
+ttk.Button(save_group, text="Save Settings", command=app.save_settings).pack(side="left")
+ttk.Button(save_group, text="Load Settings", command=app.load_settings_into_ui).pack(side="left", padx=6)

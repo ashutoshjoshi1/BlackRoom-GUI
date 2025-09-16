@@ -35,31 +35,31 @@ def build(app):
         app._live_mouse_down = False
 
         def _on_press(event):
-       app._live_mouse_down = True
+            app._live_mouse_down = True
 
         def _on_release(event):
        # When user releases after an interaction on axes, lock current limits
-       if event.inaxes is not None:
-           app.live_limits_locked = True
-       app._live_mouse_down = False
+            if event.inaxes is not None:
+                app.live_limits_locked = True
+app._live_mouse_down = False
 
-        app.live_canvas.mpl_connect("button_press_event", _on_press)
-        app.live_canvas.mpl_connect("button_release_event", _on_release)
+app.live_canvas.mpl_connect("button_press_event", _on_press)
+app.live_canvas.mpl_connect("button_release_event", _on_release)
 
         # Controls
-        ttk.Label(right, text="Integration Time (ms):").pack(anchor="w")
-        ttk.Button(right, text="Reset Zoom", command=app._live_reset_view).pack(anchor="w", pady=(6, 0))
-        app.it_entry = ttk.Entry(right, width=12)
-        app.it_entry.insert(0, "2.4")
-        app.it_entry.pack(anchor="w", pady=(0, 10))
-        app.apply_it_btn = ttk.Button(right, text="Apply IT", command=app.apply_it)
-        app.apply_it_btn.pack(anchor="w", pady=(0, 10))
+ttk.Label(right, text="Integration Time (ms):").pack(anchor="w")
+ttk.Button(right, text="Reset Zoom", command=app._live_reset_view).pack(anchor="w", pady=(6, 0))
+app.it_entry = ttk.Entry(right, width=12)
+app.it_entry.insert(0, "2.4")
+app.it_entry.pack(anchor="w", pady=(0, 10))
+app.apply_it_btn = ttk.Button(right, text="Apply IT", command=app.apply_it)
+app.apply_it_btn.pack(anchor="w", pady=(0, 10))
 
-        ttk.Separator(right, orient="horizontal").pack(fill="x", pady=6)
+ttk.Separator(right, orient="horizontal").pack(fill="x", pady=6)
 
-        ttk.Label(right, text="Laser Controls").pack(anchor="w")
-        app.laser_vars = {}
-        for tag in ["405", "445", "488", "377", "517", "532", "Hg_Ar"]:
+ttk.Label(right, text="Laser Controls").pack(anchor="w")
+app.laser_vars = {}
+for tag in ["405", "445", "488", "377", "517", "532", "Hg_Ar"]:
        var = tk.BooleanVar(value=False)
        btn = ttk.Checkbutton(
            right, text=f"{tag} nm", variable=var,
@@ -67,9 +67,9 @@ def build(app):
        btn.pack(anchor="w")
        app.laser_vars[tag] = var
 
-        ttk.Separator(right, orient="horizontal").pack(fill="x", pady=6)
+       ttk.Separator(right, orient="horizontal").pack(fill="x", pady=6)
 
-        app.live_start_btn = ttk.Button(right, text="Start Live", command=app.start_live)
-        app.live_stop_btn = ttk.Button(right, text="Stop Live", command=app.stop_live)
-        app.live_start_btn.pack(anchor="w", pady=2)
-        app.live_stop_btn.pack(anchor="w", pady=2)
+       app.live_start_btn = ttk.Button(right, text="Start Live", command=app.start_live)
+       app.live_stop_btn = ttk.Button(right, text="Stop Live", command=app.stop_live)
+       app.live_start_btn.pack(anchor="w", pady=2)
+       app.live_stop_btn.pack(anchor="w", pady=2)
