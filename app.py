@@ -25,6 +25,8 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 # matplotlib embed
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+
 
 # serial
 import serial
@@ -635,12 +637,26 @@ class SpectroApp(tk.Tk):
                 x = np.arange(len(y))
                 self.npix = len(y)
                 self.data.npix = self.npix
-                self._update_live_plot(x, y)
+                self._update_live_spectrum(x, y)
 
             except Exception as e:
                 self._post_error("Live error", e)
                 break
 
+
+    
+    def _update_live_spectrum(self, x: np.ndarray, y: np.ndarray):
+        """Update the Live View plot (xs, ys)."""
+        try:
+            self.live_line.set_data(x, y)
+            xmax = max(10, len(y) - 1)
+            ymax = max(1000.0, float(np.nanmax(y)) * 1.1)
+            self.live_ax.set_xlim(0, xmax)
+            self.live_ax.set_ylim(0, ymax)
+            # keep user zoom if you've implemented a lock flag in tabs/live_view_tab.py
+            self.live_canvas.draw_idle()
+        except Exception as e:
+            self._post_error("Live plot update", e)
 
     def _update_live_plot(self, y: np.ndarray, it: float, peak: float, tag: str):
         """Update the measurement plot with current data (runs on the main UI thread)."""
