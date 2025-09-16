@@ -478,6 +478,8 @@ class SpectroApp(tk.Tk):
         # live view thread control
         self.live_running = threading.Event()
         self.live_thread: Optional[threading.Thread] = None
+        self._live_busy = False
+
 
         # measurement control
         self.measure_running = threading.Event()
@@ -511,6 +513,51 @@ class SpectroApp(tk.Tk):
         except:
             pass
 
+    def _live_loop(self):
+        if not self.live_running.is_set():
+            return
+        if self._live_busy:
+            # Schedule next tick & bail; avoids overlapping DLL calls
+            self.after(30, self._live_loop)
+            return
+
+        self._live_busy = True
+        try:
+            # One-shot acquisition
+            try:
+                # Your existing Avantes calls here; this is typical:
+                self.spec.measure(ncy=1)
+                self.spec.wait_for_measurement()
+                y = np.array(self.spec.rcm, dtype=float) if hasattr(self.spec, "rcm") else np.array([], dtype=float)
+            except Exception as e:
+                # Handle transient Avantes errors (-5 pending, -16 comm) by skipping this frame
+                # You can also log e here
+                y = np.array([], dtype=float)
+
+            x = np.arange(len(y))
+            # Update plot safely (will handle empty y)
+            self._update_live_spectrum(x, y)
+
+        finally:
+            self._live_busy = False
+            # Schedule next loop tick
+            self.after(30, self._live_loop)
+
+
+    def _attempt_reconnect(self):
+        try:
+            if hasattr(self, "spec") and hasattr(self.spec, "disconnect"):
+                try: self.spec.disconnect()
+                except Exception: pass
+            # Reconnect using your existing connect logic
+            self.connect_spectrometer()  # assuming this sets self.spec and self.sn
+            # Restore current IT if you keep it in state
+            if hasattr(self, "current_it_ms"):
+                try: self.spec.set_it(self.current_it_ms)
+                except Exception: pass
+            self._post_info("Reconnected to spectrometer.")
+        except Exception as e:
+            self._post_error("Reconnect failed", e)
 
 
     def _build_ui(self):
@@ -645,18 +692,32 @@ class SpectroApp(tk.Tk):
 
 
     
-    def _update_live_spectrum(self, x: np.ndarray, y: np.ndarray):
-        """Update the Live View plot (xs, ys)."""
+    def _update_live_spectrum(self, x, y):
+        """Update the Live View plot safely, even if y is empty."""
         try:
+            import numpy as np
+            y = np.asarray(y, dtype=float) if y is not None else np.array([], dtype=float)
+            x = np.asarray(x, dtype=float) if x is not None else np.arange(len(y))
+
+            # If empty frame, show nothing but keep sane axes; just draw and return.
+            if y.size == 0:
+                self.live_line.set_data([], [])
+                self.live_ax.set_xlim(0, 10)
+                self.live_ax.set_ylim(0, 1000.0)
+                self.live_canvas.draw_idle()
+                return
+
+            # Normal update
             self.live_line.set_data(x, y)
             xmax = max(10, len(y) - 1)
-            ymax = max(1000.0, float(np.nanmax(y)) * 1.1)
+            ymax = self._safe_ymax(y)   # << safe upper bound, no nanmax on empty
             self.live_ax.set_xlim(0, xmax)
             self.live_ax.set_ylim(0, ymax)
-            # keep user zoom if you've implemented a lock flag in tabs/live_view_tab.py
             self.live_canvas.draw_idle()
+
         except Exception as e:
             self._post_error("Live plot update", e)
+
 
     def _update_live_plot(self, y: np.ndarray, it: float, peak: float, tag: str):
         """Update the measurement plot with current data (runs on the main UI thread)."""
@@ -790,6 +851,23 @@ class SpectroApp(tk.Tk):
             pass
 
         self.measure_running.clear()
+
+    def _safe_ymax(self, y, floor: float = 1000.0) -> float:
+        """Return a sane Y upper bound even if y is empty or all-NaN."""
+        import numpy as np
+        try:
+            y = np.asarray(y, dtype=float)
+        except Exception:
+            return floor
+        if y.size == 0 or not np.isfinite(y).any():
+            return floor
+        try:
+            m = np.nanmax(y)
+        except ValueError:
+            return floor
+        if not np.isfinite(m) or m <= 0:
+            return floor
+        return max(floor, float(m) * 1.1)
 
     def _auto_adjust_it(self, start_it: float, tag: str) -> Tuple[float, float]:
         it_ms = max(IT_MIN, min(IT_MAX, start_it))
