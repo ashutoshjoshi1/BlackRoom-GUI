@@ -28,11 +28,14 @@ Traceback (most recent call last):
           ^^^^^^^^^^^^
   File "D:\BlackRoom-GUI\app.py", line 488, in __init__
     self._build_ui()
-  File "D:\BlackRoom-GUI\app.py", line 528, in _build_ui
-    self._build_live_tab()
-  File "D:\BlackRoom-GUI\app.py", line 535, in _build_live_tab
-    from tabs.live_view_tab import build as _build
-  File "D:\BlackRoom-GUI\tabs\live_view_tab.py", line 44, in <module>
-    app._live_mouse_down = False
-    ^^^
-NameError: name 'app' is not defined
+  File "D:\BlackRoom-GUI\app.py", line 529, in _build_ui
+    self._build_measure_tab()
+  File "D:\BlackRoom-GUI\app.py", line 707, in _build_measure_tab
+    _build(self)
+  File "D:\BlackRoom-GUI\tabs\measurements_tab.py", line 39, in build
+    ttk.Button(btns, text="Stop", command=app.stop_run).pack(side="left", padx=4)
+                                          ^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2429, in __getattr__
+    return getattr(self.tk, attr)
+           ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: '_tkinter.tkapp' object has no attribute 'stop_run'
