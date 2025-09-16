@@ -36,7 +36,7 @@ def build(app):
     btns = ttk.Frame(mid)
     btns.grid(row=1, column=2, sticky="w", padx=8)
     ttk.Button(btns, text="Run Selected", command=app.run_all_selected).pack(side="left", padx=4)
-    ttk.Button(btns, text="Stop", command=app.stop_run).pack(side="left", padx=4)
+    ttk.Button(btns, text="Stop", command=app.stop_measure).pack(side="left", padx=4)
 
     # Bottom plot section
     bot = ttk.Frame(app.measure_tab)
