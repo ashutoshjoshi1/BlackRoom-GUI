@@ -48,7 +48,12 @@ def build(app):
     app.meas_ax.set_xlabel("Pixel")
     app.meas_ax.set_ylabel("Counts")
 
-    # inset for Auto-IT (peaks and IT)
+    # Main plot lines expected by app.py updater
+    (app.meas_sig_line,) = app.meas_ax.plot([], [], lw=1, label="Signal")
+    (app.meas_dark_line,) = app.meas_ax.plot([], [], lw=1, linestyle="--", label="Dark")
+    app.meas_ax.legend(loc="best")
+
+    # Inset for Auto-IT (peaks and IT)
     app.meas_inset = app.meas_ax.inset_axes([0.58, 0.52, 0.38, 0.42])
     app.meas_inset.set_title("Auto-IT steps")
     app.meas_inset.set_xlabel("step")
