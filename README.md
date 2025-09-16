@@ -21,21 +21,16 @@ python main.py
 - You can further refactor by moving handlers specific to a tab into that tab module and importing them back into `app.py`.
 
 
-PS D:\BlackRoom-GUI> python .\main.py
 Traceback (most recent call last):
-  File "D:\BlackRoom-GUI\main.py", line 4, in <module>
-    app = SpectroApp()
-          ^^^^^^^^^^^^
-  File "D:\BlackRoom-GUI\app.py", line 488, in __init__
-    self._build_ui()
-  File "D:\BlackRoom-GUI\app.py", line 529, in _build_ui
-    self._build_measure_tab()
-  File "D:\BlackRoom-GUI\app.py", line 707, in _build_measure_tab
-    _build(self)
-  File "D:\BlackRoom-GUI\tabs\measurements_tab.py", line 39, in build
-    ttk.Button(btns, text="Stop", command=app.stop_run).pack(side="left", padx=4)
-                                          ^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 1967, in __call__
+    return self.func(*args)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 861, in callit
+    func(*args)
+  File "D:\BlackRoom-GUI\app.py", line 924, in update
+    self.meas_sig_line.set_data(xs, sig)
+    ^^^^^^^^^^^^^^^^^^
   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2429, in __getattr__
     return getattr(self.tk, attr)
            ^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: '_tkinter.tkapp' object has no attribute 'stop_run'
+AttributeError: '_tkinter.tkapp' object has no attribute 'meas_sig_line'
