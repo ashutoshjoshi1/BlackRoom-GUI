@@ -1,4 +1,3 @@
-
 # Measurements tab
 import tkinter as tk
 from tkinter import ttk
@@ -48,21 +47,12 @@ def build(app):
     app.meas_ax.set_xlabel("Pixel")
     app.meas_ax.set_ylabel("Counts")
 
-    # Main plot lines expected by app.py updater
+    # Main plot lines for signal and dark
     (app.meas_sig_line,) = app.meas_ax.plot([], [], lw=1, label="Signal")
     (app.meas_dark_line,) = app.meas_ax.plot([], [], lw=1, linestyle="--", label="Dark")
     app.meas_ax.legend(loc="best")
 
-    # Inset for Auto-IT (peaks and IT)
-    app.meas_inset = app.meas_ax.inset_axes([0.58, 0.52, 0.38, 0.42])
-    app.meas_inset.set_title("Auto-IT steps")
-    app.meas_inset.set_xlabel("step")
-    app.meas_inset.set_ylabel("peak")
-    app.meas_inset2 = app.meas_inset.twinx()
-    app.meas_inset2.set_ylabel("IT (ms)")
-
-    (app.inset_peak_line,) = app.meas_inset.plot([], [], marker="o", lw=1, label="Peak")
-    (app.inset_it_line,)   = app.meas_inset2.plot([], [], marker="s", lw=1, linestyle="--", label="IT (ms)")
+    # (Auto-IT inset removed; main plot will update dynamically during Auto-IT)
 
     app.meas_canvas = FigureCanvasTkAgg(app.meas_fig, bot)
     app.meas_canvas.draw()

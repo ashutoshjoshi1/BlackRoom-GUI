@@ -1,4 +1,3 @@
-
 # Live View tab
 import tkinter as tk
 from tkinter import ttk
@@ -29,14 +28,12 @@ def build(app):
 
     # Limit locking flag (user zoom/pan should hold the limits)
     app.live_limits_locked = False
-
     def _lock_on_user_action(event):
         try:
             if event.inaxes == app.live_ax:
                 app.live_limits_locked = True
         except Exception:
             pass
-
     # Lock when user clicks or scroll-zooms
     app.live_canvas.mpl_connect("button_press_event", _lock_on_user_action)
     app.live_canvas.mpl_connect("scroll_event", _lock_on_user_action)
@@ -57,8 +54,18 @@ def build(app):
 
     ttk.Separator(right, orient="horizontal").pack(fill="x", pady=8)
 
-    # Start/Stop
+    # Start/Stop buttons
     app.live_start_btn = ttk.Button(right, text="Start Live", command=app.start_live)
     app.live_stop_btn  = ttk.Button(right, text="Stop Live",  command=app.stop_live)
     app.live_start_btn.pack(anchor="w", pady=2)
     app.live_stop_btn.pack(anchor="w", pady=2)
+
+    # Integration time control
+    int_frame = ttk.Frame(right)
+    int_frame.pack(anchor="w", pady=8)
+    ttk.Label(int_frame, text="Integration (ms):").pack(side="left")
+    app.it_entry = ttk.Entry(int_frame, width=8)
+    app.it_entry.insert(0, "2.4")        # default 2.4 ms
+    app.it_entry.pack(side="left", padx=4)
+    app.apply_it_btn = ttk.Button(int_frame, text="Apply", command=app.apply_it)
+    app.apply_it_btn.pack(side="left")

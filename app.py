@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 # matplotlib embed
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -642,18 +642,18 @@ class SpectroApp(tk.Tk):
                 break
 
 
-    def _update_live_plot(self, x, y):
-        def update():
-            self.live_line.set_data(x, y)
-
-            # Only adjust limits when NOT locked
-            if not self.live_limits_locked:
-                self.live_ax.set_xlim(0, max(10, len(x)-1))
-                ymax = np.nanmax(y) if y.size else 1.0
-                self.live_ax.set_ylim(0, max(1000, ymax * 1.1))
-
-            self.live_fig.canvas.draw_idle()
-        self.after(0, update)
+    def _update_live_plot(self, y: np.ndarray, it: float, peak: float, tag: str):
+        """Update the measurement plot with current data (runs on the main UI thread)."""
+        xs = np.arange(len(y))
+        self.meas_sig_line.set_data(xs, y)
+        # Adjust axes limits for new data
+        xmax = max(10, len(y) - 1)
+        ymax = max(1000.0, float(np.nanmax(y)) * 1.1)
+        self.meas_ax.set_xlim(0, xmax)
+        self.meas_ax.set_ylim(0, ymax)
+        # Update title with current IT and peak info
+        self.meas_ax.set_title(f"Spectrometer= {self.sn}: Live Measurement for {tag} nm | IT={it:.1f} ms | peak={peak:.0f}")
+        self.meas_canvas.draw_idle()
 
 
     def toggle_laser(self, tag: str, turn_on: bool):
@@ -775,11 +775,11 @@ class SpectroApp(tk.Tk):
 
         self.measure_running.clear()
 
-    def _auto_adjust_it(self, start_it: float) -> Tuple[float, float]:
+    def _auto_adjust_it(self, start_it: float, tag: str) -> Tuple[float, float]:
         it_ms = max(IT_MIN, min(IT_MAX, start_it))
-        peak = np.nan
+        peak = float('nan')
         iters = 0
-        self.it_history = []  # <-- track steps for the inset
+        self.it_history = []  # track (it, peak) for history if needed
         while iters <= MAX_IT_ADJUST_ITERS:
             self.spec.set_it(it_ms)
             self.spec.measure(ncy=1)
@@ -789,20 +789,23 @@ class SpectroApp(tk.Tk):
                 iters += 1
                 continue
             peak = float(np.nanmax(y))
-            self.it_history.append((it_ms, peak))  # <-- record step
-
+            # Record step and update live plot
+            self.it_history.append((it_ms, peak))
+            # Schedule main-thread update of the plot for this step
+            self.after(0, lambda arr=y.copy(), it_val=it_ms, pk=peak, tg=tag: self._update_live_plot(arr, it_val, pk, tg))
+            # Auto-IT logic: adjust integration time
             if peak >= SAT_THRESH:
                 it_ms = max(IT_MIN, it_ms * 0.7)
                 iters += 1
                 continue
             if TARGET_LOW <= peak <= TARGET_HIGH:
-                return it_ms, peak
+                return it_ms, peak  # Found good integration time
             if peak < TARGET_LOW:
                 it_ms = min(IT_MAX, it_ms + IT_STEP_UP)
             else:
                 it_ms = max(IT_MIN, it_ms - IT_STEP_DOWN)
             iters += 1
-        return it_ms, peak
+        return it_ms, peak  # Return last values if loop ends
 
 
     def _ensure_source_state(self, tag: str, turn_on: bool):
@@ -914,49 +917,23 @@ class SpectroApp(tk.Tk):
 
     def _update_last_plots(self, tag: str):
         sig, dark = self.data.last_vectors_for(tag)
-
         def update():
-            # main overlay
+            # Update main plot lines
             xmax = 10
             ymax = 1000.0
             if sig is not None:
                 xs = np.arange(len(sig))
                 self.meas_sig_line.set_data(xs, sig)
-                xmax = max(xmax, len(sig)-1)
-                ymax = max(ymax, float(np.nanmax(sig))*1.1)
+                xmax = max(xmax, len(sig) - 1)
+                ymax = max(ymax, float(np.nanmax(sig)) * 1.1)
             if dark is not None:
                 xd = np.arange(len(dark))
                 self.meas_dark_line.set_data(xd, dark)
-                xmax = max(xmax, len(dark)-1)
-                ymax = max(ymax, float(np.nanmax(dark))*1.1)
-
+                xmax = max(xmax, len(dark) - 1)
+                ymax = max(ymax, float(np.nanmax(dark)) * 1.1)
             self.meas_ax.set_xlim(0, xmax)
             self.meas_ax.set_ylim(0, ymax)
-
-            # inset: Auto-IT step history (peaks & IT)
-            steps = list(self.it_history) if hasattr(self, "it_history") else []
-            if steps:
-                st = np.arange(len(steps))
-                peaks = [p for (_, p) in steps]
-                its   = [it for (it, _) in steps]  # note order in tuple
-
-                self.meas_inset.set_xlim(-0.5, len(st)-0.5 if len(st) else 0.5)
-                # Update data
-                self.inset_peak_line.set_data(st, peaks)
-                self.inset_it_line.set_data(st, its)
-
-                # Rescale both y-axes
-                self.meas_inset.relim();  self.meas_inset.autoscale_view()
-                self.meas_inset2.relim(); self.meas_inset2.autoscale_view()
-            else:
-                # clear inset
-                self.inset_peak_line.set_data([], [])
-                self.inset_it_line.set_data([], [])
-                self.meas_inset.relim();  self.meas_inset.autoscale_view()
-                self.meas_inset2.relim(); self.meas_inset2.autoscale_view()
-
             self.meas_canvas.draw_idle()
-
         self.after(0, update)
 
 
@@ -1014,106 +991,142 @@ class SpectroApp(tk.Tk):
     def run_analysis(self):
         if not self.data.rows:
             messagebox.showwarning("Analysis", "No measurement data available.")
+            self.measure_running.clear()
             return
+        # Prepare output directory
         df = self.data.to_dataframe()
-        atype = self.analysis_type.get()
-        tag = self.analysis_tag_entry.get().strip() or "Hg_Ar"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_dir = os.path.join(os.getcwd(), 'data')
+        sn_dir = os.path.join(base_dir, str(self.sn))
+        out_dir = os.path.join(sn_dir, ts)
+        os.makedirs(out_dir, exist_ok=True)
+        # Save measurements to CSV
+        csv_path = os.path.join(out_dir, f"Measurements_{self.sn}_{ts}.csv")
+        df.to_csv(csv_path, index=False)
+        # Compute normalized LSFs for each laser (excluding Hg_Ar lamp)
+        tags = [str(w) for w in df["Wavelength"].unique() if not str(w).endswith("_dark")]
+        lsf_list = []; lsf_tags = []
+        for tag in tags:
+            if tag == "Hg_Ar":
+                continue
+            lsf = normalized_lsf_from_df(df, tag)
+            if lsf is not None:
+                lsf_list.append(lsf); lsf_tags.append(tag)
+        # Plot all normalized LSFs (log scale)
+        if lsf_list:
+            plt.ioff()
+            fig_norm = plt.figure(figsize=(12,6))
+            plt.yscale('log')
+            for lsf, tg in zip(lsf_list, lsf_tags):
+                label = f"{tg} nm" if tg.isdigit() else tg
+                plt.plot(lsf, label=label)
+            plt.title(f"Spectrometer= {self.sn}: Normalized LSFs")
+            plt.xlabel("Pixel Index"); plt.ylabel("Normalized Intensity")
+            plt.grid(True); plt.legend()
+            fig_norm.savefig(os.path.join(out_dir, f"Normalized_LSFs_{self.sn}_{ts}.png"), dpi=300, bbox_inches='tight')
+            plt.close(fig_norm)
+        # If Hg_Ar was measured, analyze dispersion (find peaks and match known lines)
+        if "Hg_Ar" in tags:
+            sig = df[df["Wavelength"]=="Hg_Ar"].iloc[-1, 4:].astype(float).values
+            dark = df[df["Wavelength"]=="Hg_Ar_dark"].iloc[-1, 4:].astype(float).values
+            signal_corr = np.clip(sig - dark, 1e-5, None)
+            peaks, _ = find_peaks(signal_corr, prominence=0.014*np.nanmax(signal_corr), distance=20)
+            peaks = np.sort(peaks)
+            sol = best_ordered_linear_match(peaks, KNOWN_HG_AR_NM, min_points=5)
+            if not sol:
+                sol = best_ordered_linear_match(peaks, KNOWN_HG_AR_NM[:-1], min_points=5)
+            matched_pixels, matched_wavelengths = ([], [])
+            if sol:
+                rmse, a_lin, b_lin, matched_pixels, matched_wavelengths = sol
+            # Plot Hg-Ar spectrum with peaks labeled
+            fig_hg = plt.figure(figsize=(14,6)); plt.yscale('log')
+            pixels = np.arange(len(signal_corr))
+            plt.plot(pixels, signal_corr, label="Dark-Corrected Hg-Ar Signal", color='blue')
+            plt.plot(peaks, signal_corr[peaks], 'ro', label='Detected Peaks')
+            for pix, wl in zip(matched_pixels, matched_wavelengths):
+                y_val = signal_corr[int(pix)]
+                plt.text(pix, y_val + 0.1*y_val, f"{wl:.1f} nm", color='brown', fontsize=10, ha='center')
+            plt.xlabel("Pixel"); plt.ylabel("Signal (Counts)")
+            plt.title(f"Spectrometer= {self.sn}: Hg-Ar Spectrum with Detected Peaks")
+            plt.legend(); plt.grid(True)
+            fig_hg.savefig(os.path.join(out_dir, f"HgAr_Spectrum_{self.sn}_{ts}.png"), dpi=300, bbox_inches='tight')
+            plt.close(fig_hg)
+        # Compute SDF matrix and plots if at least one laser LSF is available
+        if lsf_list:
+            IB_Half = IB_REGION_HALF  # half-width of in-band region for stray light calc (e.g., 10)
+            total_pix = len(lsf_list[0])
+            SDF_matrix = np.zeros((total_pix, total_pix))
+            def normalize_lsf_stray(lsf, pix):
+                ib_start = max(0, pix - IB_Half); ib_end = min(len(lsf), pix + IB_Half + 1)
+                ib_sum = float(np.sum(lsf[ib_start:ib_end]))
+                lsf_out = lsf.copy(); lsf_out[ib_start:ib_end] = 0
+                return np.zeros_like(lsf) if ib_sum <= 0 else lsf_out / ib_sum
+            pixel_locations = [int(np.nanargmax(lsf)) for lsf in lsf_list]
+            # Place each normalized stray-corrected LSF into SDF matrix column
+            for lsf, pix in zip(lsf_list, pixel_locations):
+                SDF_matrix[:len(lsf), pix] = normalize_lsf_stray(lsf, pix)
+            # Shift stray light distributions between measured lines
+            for j in range(len(pixel_locations)-1, 0, -1):
+                curr_pix = pixel_locations[j]; prev_pix = pixel_locations[j-1]
+                for col in range(curr_pix-1, prev_pix, -1):
+                    shift = curr_pix - col
+                    SDF_matrix[:-shift, col] = SDF_matrix[shift:, curr_pix]
+                    SDF_matrix[-shift:, col] = 0
+            # Extend first LSF to pixel 0
+            first_pix = pixel_locations[0]
+            for col in range(first_pix-1, -1, -1):
+                shift = first_pix - col
+                SDF_matrix[:-shift, col] = SDF_matrix[shift:, first_pix]
+                SDF_matrix[-shift:, col] = 0
+            # Shift rightmost LSF downward to fill right side
+            last_pix = pixel_locations[-1]
+            for col in range(last_pix+1, total_pix):
+                shift = col - last_pix
+                SDF_matrix[shift:, col] = SDF_matrix[:-shift, last_pix]
+                SDF_matrix[:shift, col] = 0
+            # Fill bottom zeros with last row of shifting LSF
+            for j in range(len(pixel_locations)-1, -1, -1):
+                curr_pix = pixel_locations[j]
+                stop_col = pixel_locations[j-1] + 1 if j > 0 else 0
+                last_val = SDF_matrix[-1, curr_pix]
+                for col in range(curr_pix-1, stop_col-1, -1):
+                    ib_start = max(0, col - IB_Half); ib_end = min(total_pix, col + IB_Half + 1)
+                    for row in range(ib_end, total_pix):
+                        if SDF_matrix[row, col] == 0:
+                            SDF_matrix[row, col] = last_val
+            # Fill top zeros with first row of rightmost LSF
+            last_pix2 = pixel_locations[-1]; first_val = SDF_matrix[0, last_pix2]
+            for col in range(last_pix2+1, total_pix):
+                ib_start = max(0, col - IB_Half); ib_end = min(total_pix, col + IB_Half + 1)
+                for row in range(0, ib_start):
+                    if SDF_matrix[row, col] == 0:
+                        SDF_matrix[row, col] = first_val
+            # Plot SDF line distribution for each measured line
+            fig_sdf = plt.figure(figsize=(12,6))
+            for pix in pixel_locations:
+                plt.plot(SDF_matrix[:, pix], label=f'{pix} pixel')
+            plt.xlabel('Pixels'); plt.ylabel('SDF Value')
+            plt.title(f"Spectrometer= {self.sn}: Spectral Distribution Function (SDF)")
+            plt.legend(); plt.grid(True)
+            fig_sdf.savefig(os.path.join(out_dir, f"SDF_Plot_{self.sn}_{ts}.png"), dpi=300, bbox_inches='tight')
+            plt.close(fig_sdf)
+            # Plot SDF matrix heatmap
+            fig_heat, ax_heat = plt.subplots(figsize=(10,6))
+            im = ax_heat.imshow(SDF_matrix, aspect='auto', origin='lower', cmap='coolwarm')
+            plt.colorbar(im, label='SDF Value')
+            ax_heat.set_xlabel('Pixels'); ax_heat.set_ylabel('Spectral Pixel Index')
+            ax_heat.set_title(f"Spectrometer= {self.sn}: SDF Matrix Heatmap")
+            fig_heat.savefig(os.path.join(out_dir, f"SDF_Heatmap_{self.sn}_{ts}.png"), dpi=300, bbox_inches='tight')
+            plt.close(fig_heat)
+        # Notify user and show Analysis tab
         self.analysis_text.delete("1.0", "end")
-        self.ana_ax1.clear(); self.ana_ax1.grid(True)
-        self.ana_ax2.clear(); self.ana_ax2.grid(True)
-
+        self.analysis_text.insert("end", f"Analysis complete. Results saved in {out_dir}\n")
         try:
-            if atype == "LSF":
-                lsf = normalized_lsf_from_df(df, tag)
-                if lsf is None:
-                    raise RuntimeError("Could not compute LSF (missing rows or saturated).")
-                x = np.arange(len(lsf))
-                self.ana_ax1.set_title(f"LSF (normalized) - {tag}")
-                self.ana_ax1.plot(x, lsf)
-                # center/peak
-                peak_pix = int(np.nanargmax(lsf))
-                self.ana_ax2.set_title("Zoom near peak")
-                lo = max(0, peak_pix - 50); hi = min(len(lsf), peak_pix + 50)
-                self.ana_ax2.plot(np.arange(lo, hi), lsf[lo:hi])
-                self.analysis_text.insert("end", f"LSF computed for {tag}\nPeak Pixel: {peak_pix}\n")
-
-            elif atype == "Dispersion":
-                # Use Hg_Ar (or tag) to find peaks, then match to known lines
-                sig, _ = self.data.last_vectors_for(tag)
-                if sig is None:
-                    raise RuntimeError(f"No '{tag}' signal found.")
-                # find prominent peaks
-                peaks, _ = find_peaks(sig, height=np.nanmax(sig)*0.2, distance=5)
-                peaks = np.sort(peaks)
-                # attempt match with known lines
-                sol = best_ordered_linear_match(peaks, KNOWN_HG_AR_NM, min_points=4)
-                if not sol:
-                    raise RuntimeError("Could not fit linear dispersion to known lines.")
-                rmse, a, b, pix_sel, wl_sel = sol
-                wl_pred = a * np.arange(len(sig)) + b
-                self.ana_ax1.set_title("Dispersion Mapping (nm vs pixel)")
-                self.ana_ax1.plot(np.arange(len(sig)), wl_pred, lw=1)
-                self.ana_ax2.set_title("Peak Match")
-                self.ana_ax2.plot(pix_sel, wl_sel, "o")
-                self.analysis_text.insert("end", f"Dispersion fit: wl = {a:.6f}*pix + {b:.3f}\nRMSE: {rmse:.3f} nm\n")
-                self.analysis_text.insert("end", f"Used peaks: {pix_sel.tolist()}\nMapped to: {wl_sel.tolist()}\n")
-
-            elif atype == "Stray Light":
-                lsf = normalized_lsf_from_df(df, tag)
-                if lsf is None:
-                    raise RuntimeError("Could not compute LSF for stray light.")
-                peak_pix = int(np.nanargmax(lsf))
-                metrics = stray_light_metrics(lsf, peak_pix, ib_half=IB_REGION_HALF)
-                self.ana_ax1.set_title("LSF (normalized)")
-                self.ana_ax1.plot(np.arange(len(lsf)), lsf)
-                self.ana_ax2.set_title("Bands")
-                lo = max(0, peak_pix-50); hi = min(len(lsf), peak_pix+50)
-                self.ana_ax2.plot(np.arange(lo, hi), lsf[lo:hi])
-                self.analysis_text.insert("end", "Stray Light Metrics:\n")
-                for k, v in metrics.items():
-                    self.analysis_text.insert("end", f"  {k}: {v:.6g}\n")
-
-            elif atype == "Resolution":
-                # FWHM near a peak; if dispersion fit known, you can convert to nm
-                tag_use = tag
-                sig, dark = self.data.last_vectors_for(tag_use)
-                if sig is None or dark is None:
-                    raise RuntimeError("Missing signal/dark for resolution.")
-                y = (sig - dark).astype(float)
-                y -= np.nanmin(y)
-                if np.nanmax(y) <= 0:
-                    raise RuntimeError("Flat/invalid spectrum for resolution.")
-                y /= np.nanmax(y)
-                xpix = np.arange(len(y))
-                fwhm_pix = compute_fwhm(xpix, y)
-                # try to estimate nm per pixel via simple two-line fit if available
-                peaks, _ = find_peaks(y, height=0.2, distance=5)
-                nm_per_pix = np.nan
-                if len(peaks) >= 4:
-                    sol = best_ordered_linear_match(peaks, KNOWN_HG_AR_NM, min_points=4)
-                    if sol:
-                        _, a, b, _, _ = sol
-                        nm_per_pix = a
-                self.ana_ax1.set_title("Signal - Dark (normalized)")
-                self.ana_ax1.plot(xpix, y)
-                self.ana_ax2.set_title("Peak Zoom")
-                if len(peaks) > 0:
-                    p0 = int(peaks[np.argmax(y[peaks])])
-                    lo = max(0, p0-50); hi = min(len(y), p0+50)
-                    self.ana_ax2.plot(np.arange(lo, hi), y[lo:hi])
-                txt = f"FWHM ≈ {fwhm_pix:.3f} pixels"
-                if np.isfinite(nm_per_pix):
-                    txt += f"  (~{fwhm_pix*nm_per_pix:.3f} nm with slope {nm_per_pix:.6f} nm/pixel)"
-                self.analysis_text.insert("end", txt + "\n")
-
-            else:
-                raise RuntimeError(f"Unknown analysis type '{atype}'")
-
-        except Exception as e:
-            self._post_error("Analysis Error", e)
-
-        self.ana_canvas1.draw()
-        self.ana_canvas2.draw()
+            nb = self.live_tab.nametowidget(self.live_tab.winfo_parent())  # get Notebook widget
+            nb.select(self.analysis_tab)  # switch to Analysis tab
+        except Exception:
+            pass
+        self.measure_running.clear()
 
     def export_analysis_plots(self):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1206,33 +1219,35 @@ class SpectroApp(tk.Tk):
             if res != "OK" or ndev <= 0:
                 raise RuntimeError("No Avantes devices detected.")
             res, infos = ava.get_all_devices_info(ndev)
-            # pick first SN if available, else rely on wrapper default
-            try:
-                sers = []
-                for i in range(ndev):
-                    ident = getattr(infos, f"a{i}")
-                    sn = ident.SerialNumber
-                    if isinstance(sn, (bytes, bytearray)):
-                        sn = sn.decode("utf-8", errors="ignore")
-                    sers.append(sn)
-                if sers:
+            sers = []
+            for idx in range(ndev):
+                ident = getattr(infos, f"a{idx}")
+                sn = ident.SerialNumber
+                if isinstance(sn, (bytes, bytearray)):
+                    sn = sn.decode('utf-8', errors='ignore')
+                sers.append(sn)
+            if ndev > 1:
+                choices = "\n".join(f"{k+1}: {s}" for k, s in enumerate(sers))
+                selection = simpledialog.askinteger(
+                    "Select Spectrometer",
+                    f"Multiple spectrometers detected:\n{choices}\nEnter device number:",
+                    parent=self
+                )
+                if selection is None:
+                    messagebox.showinfo("Spectrometer", "Spectrometer selection cancelled.")
+                    return
+                if 1 <= selection <= len(sers):
+                    ava.sn = sers[selection-1]
+                else:
+                    messagebox.showwarning("Spectrometer", "Invalid selection. Connecting to first device.")
                     ava.sn = sers[0]
-            except Exception:
-                pass
-
+            elif sers:
+                ava.sn = sers[0]
             ava.connect()
             self.spec = ava
             self.sn = getattr(ava, "sn", "Unknown")
-            self.data.serial_number = self.sn
-            self.npix = getattr(ava, "npix_active", self.npix)
-            self.data.npix = self.npix
-
             self.spec_status.config(text=f"Connected: {self.sn}", foreground="green")
-            messagebox.showinfo("Spectrometer", f"Connected to SN={self.sn}")
-        except Exception as e:
-            self.spec = None
-            self.spec_status.config(text="Disconnected", foreground="red")
-            self._post_error("Spectrometer Connect", e)
+            messagebox.showinfo("Spectrometer", f"Connected to spectrometer {self.sn}")
 
     def disconnect_spectrometer(self):
         try:
