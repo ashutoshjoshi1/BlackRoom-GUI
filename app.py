@@ -487,8 +487,8 @@ class SpectroApp(tk.Tk):
         # UI
         self._build_ui()
 
-        # load persisted settings if any
-        self.load_settings_into_ui()
+        # load persisted settings after UI is fully constructed
+        self.after_idle(self.load_settings_into_ui)
         self.after(300, self._all_off_on_start)
 
 
@@ -1282,6 +1282,15 @@ class SpectroApp(tk.Tk):
             messagebox.showerror("Settings", str(e))
 
     def load_settings_into_ui(self):
+        # If setup widgets are not yet available, try again shortly
+        required = ["dll_entry", "obis_entry", "cube_entry", "relay_entry", "power_entries"]
+        if not all(hasattr(self, n) for n in required):
+            try:
+                self.after(50, self.load_settings_into_ui)
+            except Exception:
+                pass
+            return
+
         if not os.path.isfile(SETTINGS_FILE):
             # init defaults
             self.dll_entry.delete(0, "end")
