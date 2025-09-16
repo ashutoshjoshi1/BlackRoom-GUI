@@ -22,15 +22,23 @@ python main.py
 
 
 Traceback (most recent call last):
-  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 1967, in __call__
-    return self.func(*args)
-           ^^^^^^^^^^^^^^^^
-  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 861, in callit
-    func(*args)
-  File "D:\BlackRoom-GUI\app.py", line 924, in update
-    self.meas_sig_line.set_data(xs, sig)
-    ^^^^^^^^^^^^^^^^^^
-  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2429, in __getattr__
-    return getattr(self.tk, attr)
-           ^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: '_tkinter.tkapp' object has no attribute 'meas_sig_line'
+  File "D:\BlackRoom-GUI\app.py", line 1064, in run_analysis
+    raise RuntimeError("Could not compute LSF for stray light.")
+RuntimeError: Could not compute LSF for stray light.
+
+measure, Could not start measurement of spec Ava1. Error: error code -5, Function is called while result of previous function is not received yet.
+measure, Could not start measurement of spec Ava1. Error: error code -5, Function is called while result of previous function is not received yet.
+measure, Could not start measurement of spec Ava1. Error: error code -5, Function is called while result of previous function is not received yet.
+measure, Could not start measurement of spec Ava1. Error: error code -5, Function is called while result of previous function is not received yet.
+Exception in thread Thread-10 (data_handling_watchdog):
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "D:\BlackRoom-GUI\avantes_spectrometer.py", line 1739, in data_handling_watchdog
+    self.measurement_done()
+  File "D:\BlackRoom-GUI\avantes_spectrometer.py", line 1812, in measurement_done
+    self.meas_end_time=self.arrival_times[-1] #Time in which the spectrometer indicated to the pc that
+                       ~~~~~~~~~~~~~~~~~~^^^^
+IndexError: list index out of range
