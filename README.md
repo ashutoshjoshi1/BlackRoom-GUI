@@ -20,3 +20,24 @@ python main.py
 - All event handlers and business logic remain in `app.py`. Only the UI construction for each tab moved out.
 - You can further refactor by moving handlers specific to a tab into that tab module and importing them back into `app.py`.
 
+[Live plot update] zero-size array to reduction operation fmax which has no identity
+Traceback (most recent call last):
+  File "D:\BlackRoom-GUI\app.py", line 653, in _update_live_spectrum
+    ymax = max(1000.0, float(np.nanmax(y)) * 1.1)
+                             ^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\numpy\lib\_nanfunctions_impl.py", line 486, in nanmax
+    res = np.fmax.reduce(a, axis=axis, out=out, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: zero-size array to reduction operation fmax which has no identity
+
+[Live plot update] zero-size array to reduction operation fmax which has no identity
+Traceback (most recent call last):
+  File "D:\BlackRoom-GUI\app.py", line 653, in _update_live_spectrum
+    ymax = max(1000.0, float(np.nanmax(y)) * 1.1)
+                             ^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\numpy\lib\_nanfunctions_impl.py", line 486, in nanmax
+    res = np.fmax.reduce(a, axis=axis, out=out, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: zero-size array to reduction operation fmax which has no identity
+
+measure, Could not start measurement of spec Ava1. Error: error code -16, Error in communication occurred.
