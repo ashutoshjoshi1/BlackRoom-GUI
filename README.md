@@ -21,16 +21,18 @@ python main.py
 - You can further refactor by moving handlers specific to a tab into that tab module and importing them back into `app.py`.
 
 
+PS D:\BlackRoom-GUI> python .\main.py
 Traceback (most recent call last):
-  File "D:\BlackRoom-GUI\main.py", line 8, in <module>
+  File "D:\BlackRoom-GUI\main.py", line 4, in <module>
     app = SpectroApp()
           ^^^^^^^^^^^^
-  File "D:\BlackRoom-GUI\app.py", line 493, in __init__
-    self.load_settings_into_ui()
-  File "D:\BlackRoom-GUI\app.py", line 1290, in load_settings_into_ui
-    self.dll_entry.delete(0, "end")
-    ^^^^^^^^^^^^^^
-  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2429, in __getattr__
-    return getattr(self.tk, attr)
-           ^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: '_tkinter.tkapp' object has no attribute 'dll_entry'
+  File "D:\BlackRoom-GUI\app.py", line 488, in __init__
+    self._build_ui()
+  File "D:\BlackRoom-GUI\app.py", line 528, in _build_ui
+    self._build_live_tab()
+  File "D:\BlackRoom-GUI\app.py", line 535, in _build_live_tab
+    from tabs.live_view_tab import build as _build
+  File "D:\BlackRoom-GUI\tabs\live_view_tab.py", line 44, in <module>
+    app._live_mouse_down = False
+    ^^^
+NameError: name 'app' is not defined
