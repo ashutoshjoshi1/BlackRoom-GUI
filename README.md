@@ -21,5 +21,48 @@ python main.py
 - You can further refactor by moving handlers specific to a tab into that tab module and importing them back into `app.py`.
 
 
-PS D:\BlackRoom-GUI> python .\main.py
-measure, Could not start measurement of spec Ava1. Error: error code -5, Function is called while result of previous function is not received yet.
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 1967, in __call__
+    return self.func(*args)
+           ^^^^^^^^^^^^^^^^
+  File "D:\BlackRoom-GUI\app.py", line 622, in apply_it
+    self._post_info(f"Queued IT={it_ms:.3f} ms (will apply next frame).")
+    ^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2429, in __getattr__
+    return getattr(self.tk, attr)
+           ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: '_tkinter.tkapp' object has no attribute '_post_info'
+Exception in Tkinter callback
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 1967, in __call__
+    return self.func(*args)
+           ^^^^^^^^^^^^^^^^
+  File "D:\BlackRoom-GUI\app.py", line 622, in apply_it
+    self._post_info(f"Queued IT={it_ms:.3f} ms (will apply next frame).")
+    ^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2429, in __getattr__
+    return getattr(self.tk, attr)
+           ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: '_tkinter.tkapp' object has no attribute '_post_info'
+
+
+
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 1967, in __call__
+    return self.func(*args)
+           ^^^^^^^^^^^^^^^^
+  File "D:\BlackRoom-GUI\app.py", line 622, in apply_it
+    self._post_info(f"Queued IT={it_ms:.3f} ms (will apply next frame).")
+    ^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2429, in __getattr__
+    return getattr(self.tk, attr)
+           ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: '_tkinter.tkapp' object has no attribute '_post_info'
+[Measurement 405] SpectroApp._auto_adjust_it() missing 1 required positional argument: 'tag'
+Traceback (most recent call last):
+  File "D:\BlackRoom-GUI\app.py", line 826, in _measure_sequence_thread
+    self._run_single_measurement(tag, start_it_override)
+  File "D:\BlackRoom-GUI\app.py", line 1010, in _run_single_measurement
+    it_ms, peak = self._auto_adjust_it(start_it)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: SpectroApp._auto_adjust_it() missing 1 required positional argument: 'tag'
