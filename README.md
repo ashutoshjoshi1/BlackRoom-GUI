@@ -19,3 +19,7 @@ python main.py
 
 - All event handlers and business logic remain in `app.py`. Only the UI construction for each tab moved out.
 - You can further refactor by moving handlers specific to a tab into that tab module and importing them back into `app.py`.
+
+
+PS D:\BlackRoom-GUI> python .\main.py
+measure, Could not start measurement of spec Ava1. Error: error code -5, Function is called while result of previous function is not received yet.
