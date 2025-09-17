@@ -1,4 +1,4 @@
-# app.py (delegates tab builders to /tabs)
+# app.py (tab builders delegated to tabs/* modules)
 # spectro_control_gui.py
 # ---------------------------------------------------------------
 # A complete tkinter GUI for Avantes spectrometer + lasers + relay
@@ -15,19 +15,16 @@ import traceback
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-import threading
 
 import numpy as np
 import pandas as pd
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, messagebox
 
 # matplotlib embed
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
-
 
 # serial
 import serial
@@ -39,6 +36,14 @@ from scipy.optimize import curve_fit
 
 # Avantes wrapper (must be present alongside this file)
 from avantes_spectrometer import Avantes_Spectrometer
+
+# Characterization analysis helpers
+from characterization_analysis import (
+    AnalysisArtifact,
+    CharacterizationConfig,
+    CharacterizationResult,
+    perform_characterization,
+)
 
 
 # =========================
@@ -59,7 +64,8 @@ DEFAULT_COM_PORTS = {
 OBIS_LASER_MAP = {
     "405": 5,
     "445": 4,
-    "488": 3
+    "488": 3,
+    "640": 2,
 }
 
 # Default powers (Watts for OBIS/CUBE setpoints, you can interpret as needed)
@@ -75,7 +81,7 @@ DEFAULT_LASER_POWERS = {
 }
 
 # Automated measurement list (you can change from GUI too)
-DEFAULT_ALL_LASERS = ["445", "405", "377", "Hg_Ar"]
+DEFAULT_ALL_LASERS = ["532", "445", "405", "377", "Hg_Ar", "640"]
 
 # Integration time bounds (ms)
 IT_MIN = 0.2
@@ -479,12 +485,6 @@ class SpectroApp(tk.Tk):
         # live view thread control
         self.live_running = threading.Event()
         self.live_thread: Optional[threading.Thread] = None
-        self._live_busy = False
-
-
-        self.spec_lock = threading.Lock()
-        self.pending_it_ms = None
-        self.current_it_ms = 2.4  
 
         # measurement control
         self.measure_running = threading.Event()
@@ -493,11 +493,39 @@ class SpectroApp(tk.Tk):
         # in-memory measurements
         self.data = MeasurementData(npix=self.npix, serial_number=self.sn)
 
+        # Characterization analysis state
+        self.char_config = CharacterizationConfig()
+        self.analysis_result: Optional[CharacterizationResult] = None
+        self.analysis_artifacts: List[AnalysisArtifact] = []
+        self.analysis_summary_lines: List[str] = []
+        self.results_folder: Optional[str] = None
+        self.last_results_timestamp: Optional[str] = None
+        self.latest_csv_path: Optional[str] = None
+
+        # expose configuration constants for helper modules
+        self.IT_MIN = IT_MIN
+        self.IT_MAX = IT_MAX
+        self.SAT_THRESH = SAT_THRESH
+        self.TARGET_LOW = TARGET_LOW
+        self.TARGET_HIGH = TARGET_HIGH
+        self.TARGET_MID = TARGET_MID
+        self.IT_STEP_UP = IT_STEP_UP
+        self.IT_STEP_DOWN = IT_STEP_DOWN
+        self.MAX_IT_ADJUST_ITERS = MAX_IT_ADJUST_ITERS
+        self.DEFAULT_START_IT = DEFAULT_START_IT
+        self.N_SIG = N_SIG
+        self.N_DARK = N_DARK
+        self.N_SIG_640 = N_SIG_640
+        self.N_DARK_640 = N_DARK_640
+        self.DEFAULT_COM_PORTS = DEFAULT_COM_PORTS
+        self.DEFAULT_LASER_POWERS = DEFAULT_LASER_POWERS
+        self.SETTINGS_FILE = SETTINGS_FILE
+
         # UI
         self._build_ui()
 
-        # load persisted settings after UI is fully constructed
-        self.after_idle(self.load_settings_into_ui)
+        # load persisted settings if any
+        self.load_settings_into_ui()
         self.after(300, self._all_off_on_start)
 
 
@@ -517,57 +545,7 @@ class SpectroApp(tk.Tk):
             self.live_fig.canvas.draw_idle()
         except:
             pass
-def _live_loop(self):
-    if not self.live_running.is_set():
-        return
-    if getattr(self, "_live_busy", False):
-        self.after(30, self._live_loop)
-        return
 
-    self._live_busy = True
-    try:
-        y = np.array([], dtype=float)
-        try:
-            with self.spec_lock:
-                self.spec.measure(ncy=1)
-                self.spec.wait_for_measurement()
-                y = np.array(getattr(self.spec, "rcm", []), dtype=float)
-
-                if self.pending_it_ms is not None:
-                    try:
-                        self.spec.set_it(self.pending_it_ms)
-                        self._post_info(f"Applied queued IT={self.pending_it_ms:.3f} ms.")
-                        self.current_it_ms = self.pending_it_ms
-                    finally:
-                        self.pending_it_ms = None
-
-        except Exception as e:
-            self._post_error("Live frame", e)
-            y = np.array([], dtype=float)
-
-        x = np.arange(len(y))
-        self._update_live_spectrum(x, y)
-
-    finally:
-        self._live_busy = False
-        self.after(30, self._live_loop)
-
-
-
-    def _attempt_reconnect(self):
-        try:
-            if hasattr(self, "spec") and hasattr(self.spec, "disconnect"):
-                try: self.spec.disconnect()
-                except Exception: pass
-            # Reconnect using your existing connect logic
-            self.connect_spectrometer()  # assuming this sets self.spec and self.sn
-            # Restore current IT if you keep it in state
-            if hasattr(self, "current_it_ms"):
-                try: self.spec.set_it(self.current_it_ms)
-                except Exception: pass
-            self._post_info("Reconnected to spectrometer.")
-        except Exception as e:
-            self._post_error("Reconnect failed", e)
 
 
     def _build_ui(self):
@@ -591,193 +569,165 @@ def _live_loop(self):
 
     # ------------------ Live View Tab --------------------
     def _build_live_tab(self):
-         from tabs.live_view_tab import build as _build
-         _build(self)
-def apply_it(self):
-    """Set integration time (ms) safely. Queues during live/measure; applies when idle."""
-    try:
-        raw = getattr(self, 'it_entry', None).get().strip() if getattr(self, 'it_entry', None) else str(getattr(self, 'current_it_ms', 2.4))
-        it_ms = float(raw)
-    except Exception:
-        self._post_error("Invalid IT", "Could not parse integration time entry.")
-        return
+        from tabs.live_view_tab import build as _build
+        _build(self)
+    def _build_measure_tab(self):
+        from tabs.measurements_tab import build as _build
+        _build(self)
+    def _build_analysis_tab(self):
+        from tabs.analysis_tab import build as _build
+        _build(self)
+    def _build_setup_tab(self):
+        from tabs.setup_tab import build as _build
+        _build(self)
 
-    IT_MIN = getattr(self, "IT_MIN", 0.02)        # ms
-    IT_MAX = getattr(self, "IT_MAX", 10000.0)     # ms
-    it_ms = max(IT_MIN, min(IT_MAX, it_ms))
+    # ------------------ Characterization results helpers ------------------
+    def _prepare_results_folder(self) -> Tuple[str, str]:
+        sn = self.sn or "Unknown"
+        base = os.path.join(os.getcwd(), "data", sn)
+        os.makedirs(base, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return base, timestamp
 
-    self.current_it_ms = it_ms
+    def _safe_ymax(self, arr: np.ndarray) -> float:
+        try:
+            if arr is None or len(arr) == 0 or not np.isfinite(arr).any():
+                return 1000.0
+            return max(1000.0, float(np.nanmax(arr)) * 1.1)
+        except Exception:
+            return 1000.0
 
-    if getattr(self, "live_running", None) and self.live_running.is_set():
-        self.pending_it_ms = it_ms
-        self._post_info(f"Queued IT={it_ms:.3f} ms (will apply next frame).")
-        return
-    if getattr(self, "measure_running", None) and self.measure_running.is_set():
-        self.pending_it_ms = it_ms
-        self._post_info(f"Queued IT={it_ms:.3f} ms (will apply between steps).")
-        return
-
-    try:
-        with self.spec_lock:
-            self.spec.set_it(it_ms)
-        self._post_info(f"Set IT={it_ms:.3f} ms.")
-    except Exception as e:
-        self._post_error("Set IT failed", e)
-
-
-
-    def start_live(self):
-        if not self.spec:
-            messagebox.showwarning("Spectrometer", "Not connected.")
+    def _update_auto_it_plot(self, tag: str, spectrum: np.ndarray, it_ms: float, peak: float) -> None:
+        if not hasattr(self, "meas_sig_line"):
             return
-        if self.live_running.is_set():
+
+        x = np.arange(len(spectrum))
+        self.meas_sig_line.set_data(x, spectrum)
+        if hasattr(self, "meas_dark_line"):
+            self.meas_dark_line.set_data([], [])
+
+        xmax = max(10, len(spectrum) - 1)
+        ymax = self._safe_ymax(spectrum)
+        try:
+            self.meas_ax.set_xlim(0, xmax)
+            self.meas_ax.set_ylim(0, ymax)
+            self.meas_ax.set_title(
+                f"Spectrometer= {self.sn or 'Unknown'}: Live Measurement for {tag} nm | IT={it_ms:.1f} ms | peak={peak:.0f}"
+            )
+        except Exception:
+            pass
+        try:
+            self.meas_canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _clear_analysis_notebook(self) -> None:
+        if getattr(self, "analysis_canvases", None):
+            for canvas in self.analysis_canvases:
+                try:
+                    canvas.get_tk_widget().destroy()
+                except Exception:
+                    pass
+        if getattr(self, "analysis_notebook", None):
+            for tab_id in self.analysis_notebook.tabs():
+                self.analysis_notebook.forget(tab_id)
+        self.analysis_canvases = []
+
+    def _update_analysis_ui(self, csv_path: Optional[str] = None) -> None:
+        if not hasattr(self, "analysis_notebook"):
             return
-        self.live_running.set()
-        self.live_thread = threading.Thread(target=self._live_loop, daemon=True)
-        self.live_thread.start()
 
-    def stop_live(self):
-        self.live_running.clear()
+        self._clear_analysis_notebook()
 
-    def _live_loop(self):
-        while self.live_running.is_set():
+        if not self.analysis_artifacts:
+            self.analysis_status_var.set("Run measurements to generate characterization charts.")
+            self.analysis_text.configure(state="normal")
+            self.analysis_text.delete("1.0", "end")
+            self.analysis_text.insert("1.0", "No analysis has been generated yet.")
+            self.analysis_text.configure(state="disabled")
+            self.export_plots_btn.state(["disabled"])
+            self.open_folder_btn.state(["disabled"])
+            return
+
+        if csv_path is None:
+            csv_path = self.latest_csv_path or ""
+
+        status_file = os.path.basename(csv_path) if csv_path else "saved measurements"
+        status = f"Analysis generated from {status_file}"
+        if self.results_folder:
+            status += f" in {self.results_folder}"
+        self.analysis_status_var.set(status)
+
+        for artifact in self.analysis_artifacts:
+            frame = ttk.Frame(self.analysis_notebook)
+            self.analysis_notebook.add(frame, text=artifact.name)
+            canvas = FigureCanvasTkAgg(artifact.figure, master=frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            NavigationToolbar2Tk(canvas, frame)
+            self.analysis_canvases.append(canvas)
+
+        summary_text = "\n".join(self.analysis_summary_lines) if self.analysis_summary_lines else ""
+        self.analysis_text.configure(state="normal")
+        self.analysis_text.delete("1.0", "end")
+        self.analysis_text.insert("1.0", summary_text or "Characterization completed.")
+        self.analysis_text.configure(state="disabled")
+
+        self.export_plots_btn.state(["!disabled"])
+        self.open_folder_btn.state(["!disabled"])
+
+    def refresh_analysis_view(self):
+        self._update_analysis_ui(self.latest_csv_path)
+
+    def _finalize_measurement_run(self) -> None:
+        if not self.data.rows:
+            return
+        try:
+            folder, timestamp = self._prepare_results_folder()
+            df = self.data.to_dataframe()
+            csv_path = os.path.join(folder, f"All_Lasers_Measurements_{self.sn or 'Unknown'}_{timestamp}.csv")
+            df.to_csv(csv_path, index=False)
+            result = perform_characterization(df, self.sn or "Unknown", folder, timestamp, self.char_config)
+            self.analysis_result = result
+            self.analysis_artifacts = result.artifacts
+            self.analysis_summary_lines = result.summary_lines
+            self.analysis_summary_lines.insert(0, f"✅ Saved measurements to {csv_path}")
+            self.analysis_summary_lines.append(f"Plots saved to {folder}")
+            self.results_folder = folder
+            self.last_results_timestamp = timestamp
+            self.latest_csv_path = csv_path
+            self.after(0, lambda: self._update_analysis_ui(csv_path))
+        except Exception as exc:
             try:
-                # Start one frame
-                self.spec.measure(ncy=1)
-                # Wait for frame to complete
-                self.spec.wait_for_measurement()
+                self._post_error("Characterization", exc)
+            except Exception:
+                raise
 
-                # Apply any deferred IT safely after the completed frame
-                if self._pending_it is not None:
-                    try:
-                        it_to_apply = self._pending_it
-                        self._pending_it = None
-                        self._it_updating = True
-                        self.spec.set_it(it_to_apply)
-                        try:
-                            self.title(f"Applied IT={it_to_apply:.3f} ms")
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        self._post_error("Apply IT (deferred)", e)
-                    finally:
-                        self._it_updating = False
-                        try:
-                            self.apply_it_btn.state(["!disabled"])  # if exists
-                        except Exception:
-                            pass
-
-                # After IT changes (or none), fetch data and draw
-                y = np.array(self.spec.rcm, dtype=float)
-                x = np.arange(len(y))
-                self.npix = len(y)
-                self.data.npix = self.npix
-                self._update_live_spectrum(x, y)
-
-            except Exception as e:
-                self._post_error("Live error", e)
-                break
-def _update_live_spectrum(self, x, y):
-    try:
-        y = np.asarray(y, dtype=float) if y is not None else np.array([], dtype=float)
-        x = np.asarray(x, dtype=float) if x is not None else np.arange(len(y))
-
-        if y.size == 0:
-            if hasattr(self, 'live_line'):
-                self.live_line.set_data([], [])
-            if hasattr(self, 'live_ax'):
-                self.live_ax.set_xlim(0, 10)
-                self.live_ax.set_ylim(0, 1000.0)
-            if hasattr(self, 'live_canvas'):
-                self.live_canvas.draw_idle()
+    def export_analysis_plots(self):
+        if not self.analysis_artifacts:
             return
-
-        if hasattr(self, 'live_line'):
-            self.live_line.set_data(x, y)
-        if hasattr(self, 'live_ax'):
-            self.live_ax.set_xlim(0, max(10, len(y) - 1))
-            self.live_ax.set_ylim(0, self._safe_ymax(y))
-        if hasattr(self, 'live_canvas'):
-            self.live_canvas.draw_idle()
-    except Exception as e:
-        self._post_error("Live plot update", e)
-
-def _update_live_plot(self, y, it: float, peak: float, tag: str):
-    xs = np.arange(len(y))
-    if hasattr(self, 'meas_sig_line'):
-        self.meas_sig_line.set_data(xs, y)
-    xmax = max(10, len(y) - 1)
-    ymax = self._safe_ymax(y)
-    if hasattr(self, 'meas_ax'):
-        self.meas_ax.set_xlim(0, xmax)
-        self.meas_ax.set_ylim(0, ymax)
-        self.meas_ax.set_title(f"Spectrometer= {getattr(self, 'sn', 'Unknown')}: Live Measurement for {tag} nm | IT={it:.1f} ms | peak={peak:.0f}")
-    if hasattr(self, 'meas_canvas'):
-        self.meas_canvas.draw_idle()
-
-def _auto_adjust_it(self, start_it: float, tag: str) -> tuple[float, float]:
-    IT_MIN = getattr(self, "IT_MIN", 0.02)
-    IT_MAX = getattr(self, "IT_MAX", 10000.0)
-    SAT_THRESH = getattr(self, "SAT_THRESH", 0.98 * 65535)
-    TARGET_LOW = getattr(self, "TARGET_LOW", 0.45 * 65535)
-    TARGET_HIGH = getattr(self, "TARGET_HIGH", 0.65 * 65535)
-    IT_STEP_UP = getattr(self, "IT_STEP_UP", 0.2)
-    IT_STEP_DOWN = getattr(self, "IT_STEP_DOWN", 0.2)
-    MAX_IT_ADJUST_ITERS = getattr(self, "MAX_IT_ADJUST_ITERS", 20)
-
-    it_ms = max(IT_MIN, min(IT_MAX, start_it))
-    peak = float('nan')
-    iters = 0
-    self.it_history = []
-    fails = 0
-    MAX_FAILS = 3
-
-    def keep_running():
-        mr = getattr(self, "measure_running", None)
-        return (mr is None) or mr.is_set()
-
-    while iters <= MAX_IT_ADJUST_ITERS and keep_running():
+        folder = filedialog.askdirectory(title="Select folder for exported plots")
+        if not folder:
+            return
         try:
-            with self.spec_lock:
-                self.spec.set_it(it_ms)
-                self.spec.measure(ncy=1)
-                self.spec.wait_for_measurement()
-                y = np.array(getattr(self.spec, "rcm", []), dtype=float)
-            fails = 0
-        except Exception as e:
-            fails += 1
-            if fails >= MAX_FAILS:
-                self._post_error("Auto-IT frame", e)
-                return it_ms, peak
-            import time; time.sleep(0.02)
-            continue
+            for artifact in self.analysis_artifacts:
+                name = artifact.name.replace(" ", "_")
+                out_path = os.path.join(folder, f"{name}_{self.last_results_timestamp or ''}.png")
+                artifact.figure.savefig(out_path, dpi=300, bbox_inches="tight")
+        except Exception as exc:
+            self._post_error("Export Plots", exc)
 
-        if y.size == 0 or not np.isfinite(y).any():
-            iters += 1
-            continue
-
+    def open_results_folder(self):
+        if not self.results_folder:
+            messagebox.showinfo("Results", "No results folder available yet.")
+            return
+        folder = self.results_folder
         try:
-            peak = float(np.nanmax(y))
-        except ValueError:
-            iters += 1
-            continue
-
-        self.it_history.append((it_ms, peak))
-        self.after(0, lambda arr=y.copy(), it_val=it_ms, pk=peak, tg=tag:
-                   self._update_live_plot(arr, it_val, pk, tg))
-
-        if peak >= SAT_THRESH:
-            it_ms = max(IT_MIN, it_ms * 0.7)
-        elif TARGET_LOW <= peak <= TARGET_HIGH:
-            return it_ms, peak
-        elif peak < TARGET_LOW:
-            it_ms = min(IT_MAX, it_ms + IT_STEP_UP)
-        else:
-            it_ms = max(IT_MIN, it_ms - IT_STEP_DOWN)
-
-        iters += 1
-
-    return it_ms, peak
-if __name__ == "__main__":
-    app = SpectroApp()
-    app.mainloop()
+            if sys.platform.startswith("win"):
+                os.startfile(folder)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                os.system(f"open '{folder}'")
+            else:
+                os.system(f"xdg-open '{folder}' >/dev/null 2>&1 &")
+        except Exception as exc:
+            self._post_error("Open Folder", exc)
