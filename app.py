@@ -522,21 +522,24 @@ class SpectroApp(tk.Tk):
         if not self.live_running.is_set():
             return
 
+        # Prevent overlapping calls
         if getattr(self, "_live_busy", False):
             self.after(30, self._live_loop)
             return
 
         self._live_busy = True
         try:
-            y = None
+            import numpy as np
+            y = np.array([], dtype=float)
+
             try:
-                # Acquire device exclusively for the frame
                 with self.spec_lock:
+                    # Acquire a frame
                     self.spec.measure(ncy=1)
                     self.spec.wait_for_measurement()
-                    y = np.array(self.spec.rcm, dtype=float) if hasattr(self.spec, "rcm") else np.array([], dtype=float)
+                    y = np.array(getattr(self.spec, "rcm", []), dtype=float)
 
-                    # ---- APPLY PENDING IT *between* frames ----
+                    # Apply any queued IT safely BETWEEN frames
                     if self.pending_it_ms is not None:
                         try:
                             self.spec.set_it(self.pending_it_ms)
@@ -544,19 +547,19 @@ class SpectroApp(tk.Tk):
                             self.current_it_ms = self.pending_it_ms
                         finally:
                             self.pending_it_ms = None
-                    # -------------------------------------------
 
             except Exception as e:
-                # transient: skip this frame
+                # Skip this frame; don't crash or spam the device
                 self._post_error("Live frame", e)
                 y = np.array([], dtype=float)
 
             x = np.arange(len(y))
-            self._update_live_spectrum(x, y)  # your safe plot updater
+            self._update_live_spectrum(x, y)  # your safe live-plot updater
 
         finally:
             self._live_busy = False
             self.after(30, self._live_loop)
+
 
 
 
@@ -601,38 +604,40 @@ class SpectroApp(tk.Tk):
          _build(self)
 
     def apply_it(self):
-        """Apply integration time in ms; safe against in-flight measurements."""
+        """Set integration time in ms safely. Queues during live/measure, applies when idle."""
         try:
             raw = self.it_entry.get().strip()
             it_ms = float(raw)
         except Exception:
-            self._post_error("Invalid IT", f"Could not parse integration time: {getattr(self, 'it_entry', None)}")
+            self._post_error("Invalid IT", f"Could not parse integration time entry: {getattr(self, 'it_entry', None)}")
             return
 
-        # Clamp to sane range (adjust to your device limits if you already have IT_MIN/IT_MAX)
-        IT_MIN = getattr(self, "IT_MIN", 0.02)      # ms
-        IT_MAX = getattr(self, "IT_MAX", 10000.0)   # ms
+        # Clamp to sane range; adjust if you keep constants elsewhere
+        IT_MIN = getattr(self, "IT_MIN", 0.02)        # ms
+        IT_MAX = getattr(self, "IT_MAX", 10000.0)     # ms
         it_ms = max(IT_MIN, min(IT_MAX, it_ms))
 
+        # Track desired IT
         self.current_it_ms = it_ms
 
-        # If anything is running, just queue it; live loop / measure loop will apply
+        # If anything is running, just queue it (live loop / measure code will apply between frames)
         if getattr(self, "live_running", None) and self.live_running.is_set():
             self.pending_it_ms = it_ms
             self._post_info(f"Queued IT={it_ms:.3f} ms (will apply next frame).")
             return
         if getattr(self, "measure_running", None) and self.measure_running.is_set():
             self.pending_it_ms = it_ms
-            self._post_info(f"Queued IT={it_ms:.3f} ms (will apply between measurement steps).")
+            self._post_info(f"Queued IT change during measurement, IT={it_ms:.3f} ms will apply between steps.")
             return
 
-        # Idle -> apply now
+        # Idle → apply now under the same device lock used everywhere else
         try:
             with self.spec_lock:
                 self.spec.set_it(it_ms)
             self._post_info(f"Set IT={it_ms:.3f} ms.")
         except Exception as e:
             self._post_error("Set IT failed", e)
+
 
 
     def start_live(self):
@@ -859,93 +864,58 @@ class SpectroApp(tk.Tk):
         return max(floor, float(m) * 1.1)
 
     def _auto_adjust_it(self, start_it: float, tag: str) -> Tuple[float, float]:
-        """
-        Auto-adjust integration time to hit target peak range.
-        - Thread-safe: all DLL calls are under self.spec_lock
-        - Live UI: updates main Measurement plot each step
-        - Robust to empty frames / transient device errors
-        """
-        # Clamp start IT
         it_ms = max(IT_MIN, min(IT_MAX, start_it))
         peak = float('nan')
         iters = 0
-        self.it_history = []  # track (it, peak) for history if needed
-
-        # Tolerate a few transient device errors
+        self.it_history = []
         consecutive_failures = 0
         MAX_FAILS = 3
 
-        # If you support cancel during measurement, respect measure_running flag
-        def _keep_running() -> bool:
+        def _keep_running():
             mr = getattr(self, "measure_running", None)
             return (mr is None) or mr.is_set()
 
         while iters <= MAX_IT_ADJUST_ITERS and _keep_running():
             try:
-                # ---- Exclusive access to the spectrometer ----
+                import numpy as np, time
                 with self.spec_lock:
                     self.spec.set_it(it_ms)
                     self.spec.measure(ncy=1)
                     self.spec.wait_for_measurement()
                     y = np.array(getattr(self.spec, "rcm", []), dtype=float)
-                # ----------------------------------------------
-
-                consecutive_failures = 0  # success -> reset
-
+                consecutive_failures = 0
             except Exception as e:
                 consecutive_failures += 1
-                # Optionally log: self._post_error("Auto-IT frame", e)
                 if consecutive_failures >= MAX_FAILS:
-                    # Give up gracefully; return last attempted IT/peak
                     return it_ms, peak
-                # Small backoff before retrying
-                try:
-                    import time
-                    time.sleep(0.02)
-                except Exception:
-                    pass
+                time.sleep(0.02)
                 continue
 
-            # Empty or non-finite frame? count as an iteration and try again
             if y.size == 0 or not np.isfinite(y).any():
                 iters += 1
                 continue
 
-            # Safe peak calculation
             try:
                 peak = float(np.nanmax(y))
             except ValueError:
                 iters += 1
                 continue
 
-            # Record step and live-update the Measurement plot
             self.it_history.append((it_ms, peak))
-            self.after(
-                0,
-                lambda arr=y.copy(), it_val=it_ms, pk=peak, tg=tag:
-                    self._update_live_plot(arr, it_val, pk, tg)
-            )
+            self.after(0, lambda arr=y.copy(), it_val=it_ms, pk=peak, tg=tag:
+                    self._update_live_plot(arr, it_val, pk, tg))
 
-            # ---- Auto-IT decision logic ----
             if peak >= SAT_THRESH:
-                # Back off more aggressively if saturated
                 it_ms = max(IT_MIN, it_ms * 0.7)
-                iters += 1
-                continue
-
-            if TARGET_LOW <= peak <= TARGET_HIGH:
-                # Found good IT
+            elif TARGET_LOW <= peak <= TARGET_HIGH:
                 return it_ms, peak
-
-            if peak < TARGET_LOW:
+            elif peak < TARGET_LOW:
                 it_ms = min(IT_MAX, it_ms + IT_STEP_UP)
             else:
                 it_ms = max(IT_MIN, it_ms - IT_STEP_DOWN)
-            # --------------------------------
 
             iters += 1
 
-        # Return last known values if loop exhausted or cancelled
         return it_ms, peak
 
 
@@ -1077,6 +1047,27 @@ class SpectroApp(tk.Tk):
             self.meas_ax.set_ylim(0, ymax)
             self.meas_canvas.draw_idle()
         self.after(0, update)
+
+    def _post_info(self, msg: str):
+        """Best-effort UI log (falls back to print)."""
+        try:
+            # If you have a status label/text, prefer it here.
+            # Example: self.status_var.set(msg)
+            # Otherwise no-op and print:
+            pass
+        except Exception:
+            pass
+        print(f"[INFO] {msg}")
+
+    def _post_error(self, context: str, err: Exception | str):
+        """Best-effort UI error log (falls back to print)."""
+        try:
+            # If you have a status label/text, prefer it here.
+            # Example: self.status_var.set(f"{context}: {err}")
+            pass
+        except Exception:
+            pass
+        print(f"[ERROR] {context}: {err}")
 
 
     def save_csv(self):
