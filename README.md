@@ -20,11 +20,3 @@ python main.py
 - All event handlers and business logic remain in `app.py`. Only the UI construction for each tab moved out.
 - You can further refactor by moving handlers specific to a tab into that tab module and importing them back into `app.py`.
 
-[Measurement 405] SpectroApp._auto_adjust_it() missing 1 required positional argument: 'tag'
-Traceback (most recent call last):
-  File "D:\BlackRoom-GUI\app.py", line 831, in _measure_sequence_thread
-    self._run_single_measurement(tag, start_it_override)
-  File "D:\BlackRoom-GUI\app.py", line 980, in _run_single_measurement
-    it_ms, peak = self._auto_adjust_it(start_it)
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-TypeError: SpectroApp._auto_adjust_it() missing 1 required positional argument: 'tag'
