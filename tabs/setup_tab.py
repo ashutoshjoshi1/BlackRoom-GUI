@@ -1,14 +1,29 @@
 # Auto-generated from gui.py by splitter
-from typing import Any
+from typing import Any, List, Optional, Tuple, Dict
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import numpy as np
-import os, time
+import os, time, json, sys, traceback
+import serial
+import serial.tools.list_ports
+from avantes_spectrometer import Avantes_Spectrometer
+from datetime import datetime
 
 def build(app):
-    def _build_setup_tab(self):
+    # Import constants from app
+    DEFAULT_COM_PORTS = app.DEFAULT_COM_PORTS
+    DEFAULT_LASER_POWERS = app.DEFAULT_LASER_POWERS
+    SETTINGS_FILE = app.SETTINGS_FILE
+    OBIS_LASER_MAP = {
+        "405": 5,
+        "445": 4,
+        "488": 3,
+        "640": 2,
+    }
+
+    def _build_setup_tab():
         frame = ttk.Frame(app.setup_tab)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -19,13 +34,13 @@ def build(app):
         ttk.Label(spec_group, text="DLL Path (avaspecx64.dll):").grid(row=0, column=0, sticky="w", padx=4, pady=4)
         app.dll_entry = ttk.Entry(spec_group, width=60)
         app.dll_entry.grid(row=0, column=1, sticky="w", padx=4, pady=4)
-        ttk.Button(spec_group, text="Browse", command=app.browse_dll).grid(row=0, column=2, padx=4, pady=4)
+        ttk.Button(spec_group, text="Browse", command=browse_dll).grid(row=0, column=2, padx=4, pady=4)
 
         app.spec_status = ttk.Label(spec_group, text="Disconnected", foreground="red")
         app.spec_status.grid(row=0, column=3, padx=10)
 
-        ttk.Button(spec_group, text="Connect", command=app.connect_spectrometer).grid(row=1, column=1, padx=4, pady=4, sticky="w")
-        ttk.Button(spec_group, text="Disconnect", command=app.disconnect_spectrometer).grid(row=1, column=2, padx=4, pady=4, sticky="w")
+        ttk.Button(spec_group, text="Connect", command=connect_spectrometer).grid(row=1, column=1, padx=4, pady=4, sticky="w")
+        ttk.Button(spec_group, text="Disconnect", command=disconnect_spectrometer).grid(row=1, column=2, padx=4, pady=4, sticky="w")
 
         # COM ports
         ports_group = ttk.LabelFrame(frame, text="COM Port Configuration")
@@ -42,8 +57,8 @@ def build(app):
         app.cube_entry.grid(row=1, column=1, padx=4, pady=4, sticky="w")
         app.relay_entry.grid(row=2, column=1, padx=4, pady=4, sticky="w")
 
-        ttk.Button(ports_group, text="Refresh Ports", command=app.refresh_ports).grid(row=0, column=2, padx=6)
-        ttk.Button(ports_group, text="Test Connect", command=app.test_com_connect).grid(row=1, column=2, padx=6)
+        ttk.Button(ports_group, text="Refresh Ports", command=refresh_ports).grid(row=0, column=2, padx=6)
+        ttk.Button(ports_group, text="Test Connect", command=test_com_connect).grid(row=1, column=2, padx=6)
 
         app.obis_status = ttk.Label(ports_group, text="●", foreground="red")
         app.cube_status = ttk.Label(ports_group, text="●", foreground="red")
@@ -56,7 +71,7 @@ def build(app):
         power_group = ttk.LabelFrame(frame, text="Laser Power Configuration")
         power_group.pack(fill="x", padx=6, pady=6)
 
-        app.power_entries: Dict[str, ttk.Entry] = {}
+        app.power_entries = {}
         row = 0
         for tag in ["405", "445", "488", "640", "377", "517", "532", "Hg_Ar"]:
             ttk.Label(power_group, text=f"{tag} nm power:").grid(row=row, column=0, sticky="e", padx=4, pady=2)
@@ -69,10 +84,10 @@ def build(app):
         # Save/Load
         save_group = ttk.Frame(frame)
         save_group.pack(fill="x", padx=6, pady=8)
-        ttk.Button(save_group, text="Save Settings", command=app.save_settings).pack(side="left")
-        ttk.Button(save_group, text="Load Settings", command=app.load_settings_into_ui).pack(side="left", padx=6)
+        ttk.Button(save_group, text="Save Settings", command=save_settings).pack(side="left")
+        ttk.Button(save_group, text="Load Settings", command=load_settings_into_ui).pack(side="left", padx=6)
 
-    def refresh_ports(self):
+    def refresh_ports():
         ports = list(serial.tools.list_ports.comports())
         names = [p.device for p in ports]
         if names:
@@ -85,7 +100,7 @@ def build(app):
         else:
             messagebox.showwarning("Ports", "No serial ports detected.")
 
-    def test_com_connect(self):
+    def test_com_connect():
         app._update_ports_from_ui()
         ok_obis = app.lasers.obis.open()
         app.obis_status.config(foreground=("green" if ok_obis else "red"))
@@ -99,14 +114,14 @@ def build(app):
         if ok_cube: app.lasers.cube.close()
         if ok_relay: app.lasers.relay.close()
 
-    def browse_dll(self):
+    def browse_dll():
         path = filedialog.askopenfilename(
             title="Select avaspecx64.dll", filetypes=[("DLL", "*.dll"), ("All files", "*.*")])
         if path:
             app.dll_entry.delete(0, "end")
             app.dll_entry.insert(0, path)
 
-    def connect_spectrometer(self):
+    def connect_spectrometer():
         try:
             dll = app.dll_entry.get().strip()
             if not dll or not os.path.isfile(dll):
@@ -156,7 +171,7 @@ def build(app):
             app.spec_status.config(text="Disconnected", foreground="red")
             app._post_error("Spectrometer Connect", e)
 
-    def disconnect_spectrometer(self):
+    def disconnect_spectrometer():
         try:
             app.stop_live()
             if app.spec:
@@ -169,13 +184,13 @@ def build(app):
         except Exception as e:
             app._post_error("Spectrometer Disconnect", e)
 
-    def _update_ports_from_ui(self):
+    def _update_ports_from_ui():
         app.hw.com_ports["OBIS"] = app.obis_entry.get().strip() or DEFAULT_COM_PORTS["OBIS"]
         app.hw.com_ports["CUBE"] = app.cube_entry.get().strip() or DEFAULT_COM_PORTS["CUBE"]
         app.hw.com_ports["RELAY"] = app.relay_entry.get().strip() or DEFAULT_COM_PORTS["RELAY"]
         app.lasers.configure_ports(app.hw.com_ports)
 
-    def _get_power(self, tag: str) -> float:
+    def _get_power(tag: str) -> float:
         try:
             e = app.power_entries.get(tag)
             if e is None:
@@ -184,7 +199,7 @@ def build(app):
         except:
             return DEFAULT_LASER_POWERS.get(tag, 0.01)
 
-    def save_settings(self):
+    def save_settings():
         app._update_ports_from_ui()
         app.hw.dll_path = app.dll_entry.get().strip()
         for tag, e in app.power_entries.items():
@@ -203,7 +218,7 @@ def build(app):
         except Exception as e:
             messagebox.showerror("Settings", str(e))
 
-    def load_settings_into_ui(self):
+    def load_settings_into_ui():
         if not os.path.isfile(SETTINGS_FILE):
             # init defaults
             app.dll_entry.delete(0, "end")
@@ -231,12 +246,12 @@ def build(app):
 
     # ------------------ General helpers ------------------
 
-    def _post_error(self, title: str, ex: Exception):
+    def _post_error(title: str, ex: Exception):
         tb = "".join(traceback.format_exception(type(ex), ex, ex.__traceback__))
         print(f"[{title}] {ex}\n{tb}", file=sys.stderr)
         app.after(0, lambda: messagebox.showerror(title, str(ex)))
 
-    def on_close(self):
+    def on_close():
         try:
             app.stop_live()
             app.stop_measure()
@@ -248,5 +263,21 @@ def build(app):
                 except: pass
         finally:
             app.destroy()
+
+    # Bind functions to app object
+    app.refresh_ports = refresh_ports
+    app.test_com_connect = test_com_connect
+    app.browse_dll = browse_dll
+    app.connect_spectrometer = connect_spectrometer
+    app.disconnect_spectrometer = disconnect_spectrometer
+    app._update_ports_from_ui = _update_ports_from_ui
+    app._get_power = _get_power
+    app.save_settings = save_settings
+    app.load_settings_into_ui = load_settings_into_ui
+    app._post_error = _post_error
+    app.on_close = on_close
+
+    # Call the UI builder
+    _build_setup_tab()
 
 

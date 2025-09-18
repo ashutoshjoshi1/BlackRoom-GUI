@@ -1,5 +1,5 @@
 # Auto-generated from gui.py by splitter
-from typing import Any
+from typing import Any, List, Optional, Tuple, Dict
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -8,7 +8,17 @@ import numpy as np
 import os, time
 
 def build(app):
-    def _build_live_tab(self):
+    # Import constants from app
+    OBIS_LASER_MAP = {
+        "405": 5,
+        "445": 4,
+        "488": 3,
+        "640": 2,
+    }
+    IT_MIN = 0.2
+    IT_MAX = 3000.0
+
+    def _build_live_tab():
         left = ttk.Frame(app.live_tab)
         left.pack(side="left", fill="both", expand=True, padx=8, pady=8)
 
@@ -75,7 +85,7 @@ def build(app):
         app.live_start_btn.pack(anchor="w", pady=2)
         app.live_stop_btn.pack(anchor="w", pady=2)
 
-    def apply_it(self):
+    def apply_it():
         if not app.spec:
             messagebox.showwarning("Spectrometer", "Not connected.")
             return
@@ -129,7 +139,7 @@ def build(app):
                 pass
 
 
-    def start_live(self):
+    def start_live():
         if not app.spec:
             messagebox.showwarning("Spectrometer", "Not connected.")
             return
@@ -139,10 +149,10 @@ def build(app):
         app.live_thread = threading.Thread(target=app._live_loop, daemon=True)
         app.live_thread.start()
 
-    def stop_live(self):
+    def stop_live():
         app.live_running.clear()
 
-    def _live_loop(self):
+    def _live_loop():
         while app.live_running.is_set():
             try:
                 # Start one frame
@@ -243,7 +253,7 @@ def build(app):
 
     # ------------------ Measurements Tab -----------------
 
-    def _build_measure_tab(self):
+    def _build_measure_tab():
         top = ttk.Frame(app.measure_tab)
         top.pack(fill="x", padx=8, pady=8)
 
@@ -311,7 +321,7 @@ def build(app):
         app.meas_canvas.get_tk_widget().pack(fill="both", expand=True)
         NavigationToolbar2Tk(app.meas_canvas, bot)
 
-    def run_all_selected(self):
+    def run_all_selected():
         if not app.spec:
             messagebox.showwarning("Spectrometer", "Not connected.")
             return
@@ -333,7 +343,7 @@ def build(app):
             target=app._measure_sequence_thread, args=(tags, start_it_override), daemon=True)
         app.measure_thread.start()
 
-    def stop_measure(self):
+    def stop_measure():
         app.measure_running.clear()
 
     def _measure_sequence_thread(self, laser_tags: List[str], start_it_override: Optional[float]):
@@ -565,7 +575,7 @@ def build(app):
         app.after(0, update)
 
 
-    def save_csv(self):
+    def save_csv():
         if not app.data.rows:
             messagebox.showwarning("Save CSV", "No data collected yet.")
             return
@@ -585,7 +595,7 @@ def build(app):
 
     # ------------------ Analysis Tab --------------------
 
-    def _build_analysis_tab(self):
+    def _build_analysis_tab():
         top = ttk.Frame(app.analysis_tab)
         top.pack(fill="x", padx=8, pady=8)
 
@@ -633,7 +643,7 @@ def build(app):
         app.analysis_text.pack(fill="x", expand=True)
 
 
-    def start_analysis_from_measure(self):
+    def start_analysis_from_measure():
         """Start a measurement run for the lasers selected in the Measurement tab
         (analysis selection if available), and paint the resulting LSF/other plots in the Analysis tab.
         """
@@ -662,7 +672,7 @@ def build(app):
                     pass
         app.measure_thread = threading.Thread(target=_runner, daemon=True)
         app.measure_thread.start()
-    def run_analysis(self):
+    def run_analysis():
         if not app.data.rows:
             messagebox.showwarning("Analysis", "No measurement data available.")
             return
@@ -766,7 +776,7 @@ def build(app):
         app.ana_canvas1.draw()
         app.ana_canvas2.draw()
 
-    def export_analysis_plots(self):
+    def export_analysis_plots():
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         base = filedialog.askdirectory(title="Select folder to save analysis plots")
         if not base:
@@ -780,7 +790,7 @@ def build(app):
         except Exception as e:
             messagebox.showerror("Export Plots", str(e))
 
-    def export_analysis_summary(self):
+    def export_analysis_summary():
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         default = f"analysis_summary_{ts}.txt"
         path = filedialog.asksaveasfilename(
@@ -798,7 +808,7 @@ def build(app):
 
     # ------------------ Setup Tab -----------------------
 
-    def _build_setup_tab(self):
+    def _build_setup_tab():
         frame = ttk.Frame(app.setup_tab)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -862,7 +872,7 @@ def build(app):
         ttk.Button(save_group, text="Save Settings", command=app.save_settings).pack(side="left")
         ttk.Button(save_group, text="Load Settings", command=app.load_settings_into_ui).pack(side="left", padx=6)
 
-    def refresh_ports(self):
+    def refresh_ports():
         ports = list(serial.tools.list_ports.comports())
         names = [p.device for p in ports]
         if names:
@@ -875,7 +885,7 @@ def build(app):
         else:
             messagebox.showwarning("Ports", "No serial ports detected.")
 
-    def test_com_connect(self):
+    def test_com_connect():
         app._update_ports_from_ui()
         ok_obis = app.lasers.obis.open()
         app.obis_status.config(foreground=("green" if ok_obis else "red"))
@@ -889,14 +899,14 @@ def build(app):
         if ok_cube: app.lasers.cube.close()
         if ok_relay: app.lasers.relay.close()
 
-    def browse_dll(self):
+    def browse_dll():
         path = filedialog.askopenfilename(
             title="Select avaspecx64.dll", filetypes=[("DLL", "*.dll"), ("All files", "*.*")])
         if path:
             app.dll_entry.delete(0, "end")
             app.dll_entry.insert(0, path)
 
-    def connect_spectrometer(self):
+    def connect_spectrometer():
         try:
             dll = app.dll_entry.get().strip()
             if not dll or not os.path.isfile(dll):
@@ -946,7 +956,7 @@ def build(app):
             app.spec_status.config(text="Disconnected", foreground="red")
             app._post_error("Spectrometer Connect", e)
 
-    def disconnect_spectrometer(self):
+    def disconnect_spectrometer():
         try:
             app.stop_live()
             if app.spec:
@@ -959,7 +969,7 @@ def build(app):
         except Exception as e:
             app._post_error("Spectrometer Disconnect", e)
 
-    def _update_ports_from_ui(self):
+    def _update_ports_from_ui():
         app.hw.com_ports["OBIS"] = app.obis_entry.get().strip() or DEFAULT_COM_PORTS["OBIS"]
         app.hw.com_ports["CUBE"] = app.cube_entry.get().strip() or DEFAULT_COM_PORTS["CUBE"]
         app.hw.com_ports["RELAY"] = app.relay_entry.get().strip() or DEFAULT_COM_PORTS["RELAY"]
@@ -974,7 +984,7 @@ def build(app):
         except:
             return DEFAULT_LASER_POWERS.get(tag, 0.01)
 
-    def save_settings(self):
+    def save_settings():
         app._update_ports_from_ui()
         app.hw.dll_path = app.dll_entry.get().strip()
         for tag, e in app.power_entries.items():
@@ -993,7 +1003,7 @@ def build(app):
         except Exception as e:
             messagebox.showerror("Settings", str(e))
 
-    def load_settings_into_ui(self):
+    def load_settings_into_ui():
         if not os.path.isfile(SETTINGS_FILE):
             # init defaults
             app.dll_entry.delete(0, "end")
@@ -1026,7 +1036,7 @@ def build(app):
         print(f"[{title}] {ex}\n{tb}", file=sys.stderr)
         app.after(0, lambda: messagebox.showerror(title, str(ex)))
 
-    def on_close(self):
+    def on_close():
         try:
             app.stop_live()
             app.stop_measure()
@@ -1039,4 +1049,9 @@ def build(app):
         finally:
             app.destroy()
 
+    # Bind functions to app object (only bind functions that don't already exist in main app)
+    # Note: Some functions like start_live, stop_live, toggle_laser, apply_it are already in main app
+    app._live_loop = _live_loop
 
+    # Call the UI builder
+    _build_live_tab()

@@ -19,4 +19,3 @@ python main.py
 
 - All event handlers and business logic remain in `app.py`. Only the UI construction for each tab moved out.
 - You can further refactor by moving handlers specific to a tab into that tab module and importing them back into `app.py`.
-

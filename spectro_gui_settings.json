@@ -1,0 +1,18 @@
+{
+  "dll_path": "D:/BlackRoom-GUI/spec_ava1/Avaspec-DLL_9.14.0.9_64bits/avaspecx64.dll",
+  "com_ports": {
+    "OBIS": "COM10",
+    "RELAY": "COM11",
+    "CUBE": "COM1"
+  },
+  "laser_power": {
+    "405": 0.005,
+    "445": 0.003,
+    "488": 0.03,
+    "640": 0.03,
+    "377": 0.012,
+    "517": 1.0,
+    "532": 1.0,
+    "Hg_Ar": 1.0
+  }
+}

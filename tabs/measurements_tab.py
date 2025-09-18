@@ -1,5 +1,5 @@
 # Auto-generated from gui.py by splitter
-from typing import Any, Dict
+from typing import Any, List, Optional, Tuple, Dict
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -10,79 +10,108 @@ import serial
 import serial.tools.list_ports
 from avantes_spectrometer import Avantes_Spectrometer
 from datetime import datetime
+import threading
+import os
+from datetime import datetime
 
 def build(app):
-    def _build_measure_tab(self):
-        top = ttk.Frame(app.measure_tab)
-        top.pack(fill="x", padx=8, pady=8)
+    # Import constants from app
+    DEFAULT_ALL_LASERS = ["405", "445", "488", "517", "532", "377", "Hg_Ar"]
+    OBIS_LASER_MAP = {
+        "405": 5,
+        "445": 4,
+        "488": 3,
+        "640": 2,
+    }
 
-        ttk.Label(top, text="Automated Measurements").pack(side="left")
+    def _build_measure_tab():
+        # Create main container with better layout
+        main_frame = ttk.Frame(app.measure_tab)
+        main_frame.pack(fill="both", expand=True, padx=12, pady=12)
 
-        app.run_all_btn = ttk.Button(top, text="Run Selected", command=app.run_all_selected)
-        app.stop_all_btn = ttk.Button(top, text="Stop", command=app.stop_measure)
-        app.save_csv_btn = ttk.Button(top, text="Save CSV", command=app.save_csv)
+        # Top section - Live measurement plot (like characterization script)
+        plot_frame = ttk.LabelFrame(main_frame, text="Live Measurement Display", padding=10)
+        plot_frame.pack(fill="both", expand=True, pady=(0, 12))
 
-        app.run_all_btn.pack(side="right", padx=5)
-        app.stop_all_btn.pack(side="right", padx=5)
-        app.save_csv_btn.pack(side="right", padx=5)
+        # Add matplotlib plot (exactly like characterization script)
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        from matplotlib.figure import Figure
+        import numpy as np
 
-    
-        app.start_analysis_btn = ttk.Button(
-            top, text="Refresh Analysis", command=app.refresh_analysis_view
-        )
-        app.start_analysis_btn.pack(side="right", padx=5)
-    # Laser selection + Auto-IT options
-        mid = ttk.Frame(app.measure_tab)
-        mid.pack(fill="x", padx=8, pady=8)
+        app.measure_fig = Figure(figsize=(12, 6), dpi=100)
+        app.measure_ax = app.measure_fig.add_subplot(111)
+        app.measure_ax.set_title("Live Measurement", fontsize=14)
+        app.measure_ax.set_xlabel("Pixel Index")
+        app.measure_ax.set_ylabel("Counts")
+        app.measure_ax.set_xticks(np.arange(0, 2048, 100))
+        app.measure_ax.set_ylim(0, 69000)
+        app.measure_ax.grid(True)
 
-        ttk.Label(mid, text="Select lasers to run:").grid(row=0, column=0, sticky="w", padx=4, pady=4)
+        # Initialize empty plot line
+        app.measure_line, = app.measure_ax.plot(np.zeros(2048), lw=1, color='tab:blue')
+
+        # Add canvas to plot frame
+        canvas = FigureCanvasTkAgg(app.measure_fig, plot_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        # Bottom section - Controls in organized layout
+        controls_frame = ttk.Frame(main_frame)
+        controls_frame.pack(fill="x", pady=(0, 0))
+
+        # Left side - Laser selection
+        laser_frame = ttk.LabelFrame(controls_frame, text="Laser Selection", padding=10)
+        laser_frame.pack(side="left", fill="both", expand=True, padx=(0, 6))
 
         app.measure_vars = {}
-        tags = ["405", "445", "488", "517", "532", "640", "377", "Hg_Ar"]
-        for i, tag in enumerate(tags):
-            v = tk.BooleanVar(value=(tag in DEFAULT_ALL_LASERS))
-            chk = ttk.Checkbutton(mid, text=tag + " nm", variable=v)
-            chk.grid(row=1 + i // 6, column=(i % 6), padx=4, pady=4, sticky="w")
+        # Use the same laser list as characterization script
+        all_lasers = ["532", "445", "405", "377", "Hg_Ar"]  # From characterization script
+
+        # Create a grid layout for laser checkboxes
+        for i, tag in enumerate(all_lasers):
+            v = tk.BooleanVar(value=True)  # Default all selected like characterization script
+            chk = ttk.Checkbutton(laser_frame, text=f"{tag} nm", variable=v)
+            chk.grid(row=i // 3, column=i % 3, padx=8, pady=4, sticky="w")
             app.measure_vars[tag] = v
 
-        ttk.Label(mid, text="Auto-IT start (ms, default if blank):").grid(row=3, column=0, sticky="w", padx=4, pady=4)
-        app.auto_it_entry = ttk.Entry(mid, width=10)
+        # Middle - Settings
+        settings_frame = ttk.LabelFrame(controls_frame, text="Settings", padding=10)
+        settings_frame.pack(side="left", fill="y", padx=6)
+
+        ttk.Label(settings_frame, text="Auto-IT start (ms):").pack(anchor="w", pady=(0, 4))
+        app.auto_it_entry = ttk.Entry(settings_frame, width=12)
         app.auto_it_entry.insert(0, "")
-        app.auto_it_entry.grid(row=3, column=1, sticky="w", padx=4, pady=4)
+        app.auto_it_entry.pack(anchor="w", pady=(0, 8))
 
-        # Result plots (signal & dark)
-        bot = ttk.Frame(app.measure_tab)
-        bot.pack(fill="both", expand=True, padx=8, pady=8)
+        ttk.Label(settings_frame, text="(Leave blank for defaults)",
+                 font=("TkDefaultFont", 8)).pack(anchor="w")
 
-        app.meas_fig = Figure(figsize=(12, 6), dpi=100)
-        app.meas_ax  = app.meas_fig.add_subplot(111)
-        app.meas_ax.set_title("Last Measurement: Signal & Dark")
-        app.meas_ax.set_xlabel("Pixel")
-        app.meas_ax.set_ylabel("Counts")
-        app.meas_ax.grid(True)
+        # Right side - Action buttons
+        actions_frame = ttk.LabelFrame(controls_frame, text="Actions", padding=10)
+        actions_frame.pack(side="right", fill="y", padx=(6, 0))
 
-        (app.meas_sig_line,)  = app.meas_ax.plot([], [], lw=1.2, label="Signal (ON)")
-        (app.meas_dark_line,) = app.meas_ax.plot([], [], lw=1.2, linestyle="--", label="Dark (OFF)")
-        app.meas_ax.legend(loc="upper left")
+        # Create buttons with better styling
+        button_style = {"width": 15}
 
-        # Inset for Auto-IT steps (peaks and IT vs step index)
-        app.meas_inset = app.meas_ax.inset_axes([0.58, 0.52, 0.38, 0.42])  # x, y, w, h (relative)
-        app.meas_inset.set_title("Auto-IT steps")
-        app.meas_inset.set_xlabel("step")
-        app.meas_inset.set_ylabel("peak")
+        app.run_all_btn = ttk.Button(actions_frame, text="▶ Run Selected",
+                                   command=app.run_all_selected, **button_style)
+        app.run_all_btn.pack(pady=(0, 6))
 
-        app.meas_inset2 = app.meas_inset.twinx()
-        app.meas_inset2.set_ylabel("IT (ms)")
+        app.stop_all_btn = ttk.Button(actions_frame, text="⏹ Stop",
+                                    command=app.stop_measure, **button_style)
+        app.stop_all_btn.pack(pady=(0, 6))
 
-        (app.inset_peak_line,) = app.meas_inset.plot([], [], marker="o", lw=1, label="Peak")
-        (app.inset_it_line,)   = app.meas_inset2.plot([], [], marker="s", lw=1, linestyle="--", label="IT (ms)")
+        app.save_csv_btn = ttk.Button(actions_frame, text="💾 Save CSV",
+                                    command=app.save_csv, **button_style)
+        app.save_csv_btn.pack(pady=(0, 6))
 
-        app.meas_canvas = FigureCanvasTkAgg(app.meas_fig, bot)
-        app.meas_canvas.draw()
-        app.meas_canvas.get_tk_widget().pack(fill="both", expand=True)
-        NavigationToolbar2Tk(app.meas_canvas, bot)
+        app.start_analysis_btn = ttk.Button(actions_frame, text="📊 Analysis",
+                                          command=app.refresh_analysis_view, **button_style)
+        app.start_analysis_btn.pack()
 
-    def run_all_selected(self):
+
+
+    def run_all_selected():
         if not app.spec:
             messagebox.showwarning("Spectrometer", "Not connected.")
             return
@@ -99,12 +128,39 @@ def build(app):
                 start_it_override = float(txt)
         except:
             start_it_override = None
+
+        # Clear previous data
+        app.data.rows.clear()
+
         app.measure_running.set()
         app.measure_thread = threading.Thread(
-            target=app._measure_sequence_thread, args=(tags, start_it_override), daemon=True)
+            target=run_measurement_with_analysis, args=(tags, start_it_override), daemon=True)
         app.measure_thread.start()
 
-    def stop_measure(self):
+    def run_measurement_with_analysis(tags, start_it_override):
+        """Run measurement sequence and automatically generate analysis."""
+        try:
+            # Run the measurement sequence
+            app._measure_sequence_thread(tags, start_it_override)
+
+            # Save data to CSV
+            csv_path = app.save_measurement_data()
+            if csv_path:
+                # Generate analysis plots
+                plot_paths = app.run_analysis_and_save_plots(csv_path)
+
+                # Show completion message
+                app.after(0, lambda: messagebox.showinfo(
+                    "Measurement Complete",
+                    f"Measurement and analysis complete!\n\n"
+                    f"Data saved to: {os.path.basename(csv_path)}\n"
+                    f"Generated {len(plot_paths)} analysis plots.\n\n"
+                    f"Check the Analysis tab for results."
+                ))
+        except Exception as e:
+            app._post_error("Measurement", e)
+
+    def stop_measure():
         app.measure_running.clear()
 
     def _measure_sequence_thread(self, laser_tags: List[str], start_it_override: Optional[float]):
@@ -246,6 +302,7 @@ def build(app):
                 app.lasers.relay_off(2)
 
 
+
     def _run_single_measurement(self, tag: str, start_it_override: Optional[float]):
         # Turn on only the requested tag; others off
         for k in ["377", "517", "532", "Hg_Ar"]:
@@ -293,7 +350,7 @@ def build(app):
             # could not reach target -> just turn off
             app._ensure_source_state(tag, False)
 
-    def _run_640_measurement(self):
+    def _run_640_measurement():
         if not app.measure_running.is_set():
             return
 
@@ -402,7 +459,7 @@ def build(app):
         app.after(0, update)
 
 
-    def save_csv(self):
+    def save_csv():
         if not app.data.rows:
             messagebox.showwarning("Save CSV", "No data collected yet.")
             return
@@ -422,7 +479,7 @@ def build(app):
 
     # ------------------ Analysis Tab --------------------
 
-    def _build_analysis_tab(self):
+    def _build_analysis_tab():
         top = ttk.Frame(app.analysis_tab)
         top.pack(fill="x", padx=8, pady=8)
 
@@ -470,7 +527,7 @@ def build(app):
         app.analysis_text.pack(fill="x", expand=True)
 
 
-    def start_analysis_from_measure(self):
+    def start_analysis_from_measure():
         """Start a measurement run for the lasers selected in the Measurement tab
         (analysis selection if available), and paint the resulting LSF/other plots in the Analysis tab.
         """
@@ -499,7 +556,7 @@ def build(app):
                     pass
         app.measure_thread = threading.Thread(target=_runner, daemon=True)
         app.measure_thread.start()
-    def run_analysis(self):
+    def run_analysis():
         if not app.data.rows:
             messagebox.showwarning("Analysis", "No measurement data available.")
             return
@@ -603,7 +660,7 @@ def build(app):
         app.ana_canvas1.draw()
         app.ana_canvas2.draw()
 
-    def export_analysis_plots(self):
+    def export_analysis_plots():
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         base = filedialog.askdirectory(title="Select folder to save analysis plots")
         if not base:
@@ -617,7 +674,7 @@ def build(app):
         except Exception as e:
             messagebox.showerror("Export Plots", str(e))
 
-    def export_analysis_summary(self):
+    def export_analysis_summary():
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         default = f"analysis_summary_{ts}.txt"
         path = filedialog.asksaveasfilename(
@@ -635,7 +692,7 @@ def build(app):
 
     # ------------------ Setup Tab -----------------------
 
-    def _build_setup_tab(self):
+    def _build_setup_tab():
         frame = ttk.Frame(app.setup_tab)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -699,7 +756,7 @@ def build(app):
         ttk.Button(save_group, text="Save Settings", command=app.save_settings).pack(side="left")
         ttk.Button(save_group, text="Load Settings", command=app.load_settings_into_ui).pack(side="left", padx=6)
 
-    def refresh_ports(self):
+    def refresh_ports():
         ports = list(serial.tools.list_ports.comports())
         names = [p.device for p in ports]
         if names:
@@ -712,7 +769,7 @@ def build(app):
         else:
             messagebox.showwarning("Ports", "No serial ports detected.")
 
-    def test_com_connect(self):
+    def test_com_connect():
         app._update_ports_from_ui()
         ok_obis = app.lasers.obis.open()
         app.obis_status.config(foreground=("green" if ok_obis else "red"))
@@ -726,14 +783,14 @@ def build(app):
         if ok_cube: app.lasers.cube.close()
         if ok_relay: app.lasers.relay.close()
 
-    def browse_dll(self):
+    def browse_dll():
         path = filedialog.askopenfilename(
             title="Select avaspecx64.dll", filetypes=[("DLL", "*.dll"), ("All files", "*.*")])
         if path:
             app.dll_entry.delete(0, "end")
             app.dll_entry.insert(0, path)
 
-    def connect_spectrometer(self):
+    def connect_spectrometer():
         try:
             dll = app.dll_entry.get().strip()
             if not dll or not os.path.isfile(dll):
@@ -783,7 +840,7 @@ def build(app):
             app.spec_status.config(text="Disconnected", foreground="red")
             app._post_error("Spectrometer Connect", e)
 
-    def disconnect_spectrometer(self):
+    def disconnect_spectrometer():
         try:
             app.stop_live()
             if app.spec:
@@ -796,7 +853,7 @@ def build(app):
         except Exception as e:
             app._post_error("Spectrometer Disconnect", e)
 
-    def _update_ports_from_ui(self):
+    def _update_ports_from_ui():
         app.hw.com_ports["OBIS"] = app.obis_entry.get().strip() or app.DEFAULT_COM_PORTS["OBIS"]
         app.hw.com_ports["CUBE"] = app.cube_entry.get().strip() or app.DEFAULT_COM_PORTS["CUBE"]
         app.hw.com_ports["RELAY"] = app.relay_entry.get().strip() or app.DEFAULT_COM_PORTS["RELAY"]
@@ -811,7 +868,7 @@ def build(app):
         except:
             return app.DEFAULT_LASER_POWERS.get(tag, 0.01)
 
-    def save_settings(self):
+    def save_settings():
         app._update_ports_from_ui()
         app.hw.dll_path = app.dll_entry.get().strip()
         for tag, e in app.power_entries.items():
@@ -830,7 +887,7 @@ def build(app):
         except Exception as e:
             messagebox.showerror("Settings", str(e))
 
-    def load_settings_into_ui(self):
+    def load_settings_into_ui():
         if not os.path.isfile(app.SETTINGS_FILE):
             # init defaults
             app.dll_entry.delete(0, "end")
@@ -863,7 +920,7 @@ def build(app):
         print(f"[{title}] {ex}\n{tb}", file=sys.stderr)
         app.after(0, lambda: messagebox.showerror(title, str(ex)))
 
-    def on_close(self):
+    def on_close():
         try:
             app.stop_live()
             app.stop_measure()
@@ -876,4 +933,15 @@ def build(app):
         finally:
             app.destroy()
 
+    # Bind functions to app object
+    app.run_all_selected = run_all_selected
+    app.stop_measure = stop_measure
+    app.save_csv = save_csv
+    app.start_analysis_from_measure = start_analysis_from_measure
+    app.run_analysis = run_analysis
+    app.export_analysis_plots = export_analysis_plots
+    app.export_analysis_summary = export_analysis_summary
+
+    # Call the UI builder
+    _build_measure_tab()
 
