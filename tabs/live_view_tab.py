@@ -5,6 +5,7 @@ from tkinter import ttk, filedialog, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import numpy as np
+import traceback
 import os, time
 
 def build(app):
@@ -195,59 +196,98 @@ def build(app):
     
 
     def _update_live_plot(self, x, y):
-        # Assuming 'app' is the intended reference to the main application instance
+        # Assuming 'app' is the intended reference
         app = self
 
         def update():
+            # Check if essential UI elements still exist
+            if not hasattr(app, 'live_ax') or not hasattr(app, 'live_line') or not hasattr(app, 'live_fig'):
+                 print("Live plot UI elements missing, skipping update.")
+                 return
+
             try:
-                # --- Refined Modification Start ---
+                # --- Robust Update Logic ---
 
-                # 1. Check for invalid data early (optional but good practice)
-                if not np.all(np.isfinite(y)):
-                    print("Warning: Non-finite values detected in spectrum data.")
-                    # Option: Replace non-finite with 0 or SAT_THRESH?
-                    # y = np.nan_to_num(y, nan=0.0, posinf=app.SAT_THRESH, neginf=0.0)
-                    # For now, we'll proceed and let clip handle large numbers
+                # 1. Validate incoming data
+                if y is None or x is None or y.size == 0 or x.size != y.size:
+                    print(f"Warning: Invalid data for live plot. x:{x.size if x is not None else 'None'}, y:{y.size if y is not None else 'None'}")
+                    # Optionally clear the line if you prefer that over showing old data
+                    # app.live_line.set_data([], [])
+                    # app.live_fig.canvas.draw_idle()
+                    return
 
-                # 2. Clip saturated values for display
-                y_clipped = np.clip(y, 0, app.SAT_THRESH) # Clip bottom at 0 too
+                # Replace non-finite values (NaN, inf) BEFORE clipping/plotting
+                # Replace inf with a value slightly above SAT_THRESH for limit calculation robustness
+                y_cleaned = np.nan_to_num(y, nan=0.0, posinf=app.SAT_THRESH + 1, neginf=0.0)
 
-                # 3. Set the plot data with clipped values
+                # 2. Clip data for display (ensure it stays within visible bounds)
+                y_clipped = np.clip(y_cleaned, 0, app.SAT_THRESH)
+
+                # --- NEW: Ensure line is visible ---
+                if not app.live_line.get_visible():
+                    print("Warning: Plot line was invisible, setting to visible.")
+                    app.live_line.set_visible(True)
+                # --- End NEW ---
+
+                # 3. Update plot data
                 app.live_line.set_data(x, y_clipped)
+                # print(f"Plot updated. Max raw: {np.max(y):.0f}, Max clipped: {np.max(y_clipped):.0f}") # Debug
 
-                # 4. Handle axis limits carefully
+                # 4. Handle axis limits
                 if not app.live_limits_locked:
-                    app.live_ax.set_xlim(0, max(10, len(x)-1))
+                    try:
+                        # Set X limits safely
+                        x_min, x_max = 0, max(10, len(x)-1)
+                        if np.isfinite(x_min) and np.isfinite(x_max) and x_max > x_min:
+                            app.live_ax.set_xlim(x_min, x_max)
 
-                    # Calculate ymax based on *clipped* data to avoid issues with potential 'inf'
-                    # Add a small buffer above SAT_THRESH for visual clarity
-                    current_ymax = np.nanmax(y_clipped) if y_clipped.size > 0 else 1.0
-                    upper_limit = max(app.SAT_THRESH * 1.05, max(1000, current_ymax * 1.1))
+                        # Set Y limits based on clipped data, ensuring buffer above saturation
+                        y_min = 0
+                        current_ymax = np.max(y_clipped) if y_clipped.size > 0 else 1.0
+                        # Ensure limit is noticeably above SAT_THRESH if saturated
+                        upper_limit = max(app.SAT_THRESH * 1.05, max(1000, current_ymax * 1.1))
 
-                    # Ensure the upper limit is finite
-                    if not np.isfinite(upper_limit):
-                        upper_limit = app.SAT_THRESH * 1.1 # Fallback limit
+                        # Final check for valid Y limits
+                        if np.isfinite(y_min) and np.isfinite(upper_limit) and upper_limit > y_min:
+                            app.live_ax.set_ylim(y_min, upper_limit)
+                        else:
+                             # Fallback if calculation failed
+                            print(f"Warning: Invalid Y limits calculated ({y_min}, {upper_limit}). Using fallback.")
+                            app.live_ax.set_ylim(0, app.SAT_THRESH * 1.1)
 
-                    app.live_ax.set_ylim(0, upper_limit)
+                        # --- NEW: Explicitly recompute limits and scale ---
+                        # This might help if autoscale was somehow disabled or limits got stuck
+                        # app.live_ax.relim()
+                        # app.live_ax.autoscale_view(scalex=False, scaley=True) # Rescale Y only
+                        # Try uncommenting the above two lines if issues persist after other changes
+                        # --- End NEW ---
 
-                # --- Refined Modification End ---
+                    except Exception as lim_e:
+                        print(f"Error setting axis limits: {lim_e}")
+                        # Attempt fallback
+                        try:
+                             app.live_ax.set_ylim(0, app.SAT_THRESH * 1.1)
+                        except Exception as fallback_e:
+                             print(f"Fallback limit setting also failed: {fallback_e}")
 
+                # 5. Redraw canvas
                 app.live_fig.canvas.draw_idle()
 
             except Exception as e:
-                # Add error logging here if the plot update itself fails
-                print(f"Error updating live plot: {e}")
-                import traceback
+                print(f"ERROR during plot update: {e}")
                 traceback.print_exc()
 
-        # Check if app is still valid before scheduling update
-        # (Handles case where window is closed during operation)
+        # Schedule the update safely
         try:
-            app.after(0, update)
+            if app.winfo_exists():
+                 app.after(0, update)
+            # else: print("App window destroyed, skipping plot schedule.") # Less noisy
         except tk.TclError:
-            # Handle cases where the app/widget might be destroyed
+             # Handle race condition where app might be destroyed
+            # print(f"TclError scheduling plot update (likely app closed).") # Less noisy
             pass
-
+        except Exception as e:
+             print(f"Unexpected error scheduling plot update: {e}")
 
     def toggle_laser(self, tag: str, turn_on: bool):
         try:
