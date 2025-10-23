@@ -192,32 +192,61 @@ def build(app):
                 break
 
 
+    
+
     def _update_live_plot(self, x, y):
-        # The 'self' argument here might be incorrect as it's defined inside build(app)
-        # It should likely refer to 'app' or be removed if not needed.
-        # Assuming it should refer to the main app instance:
-        app = self # Or however the main app instance is accessed here.
+        # Assuming 'app' is the intended reference to the main application instance
+        app = self
 
         def update():
-            # --- Modification Start ---
-            # Clip saturated values to the saturation threshold
-            y_clipped = np.clip(y, None, app.SAT_THRESH)
-            # --- Modification End ---
+            try:
+                # --- Refined Modification Start ---
 
-            app.live_line.set_data(x, y_clipped) # Use the clipped data
+                # 1. Check for invalid data early (optional but good practice)
+                if not np.all(np.isfinite(y)):
+                    print("Warning: Non-finite values detected in spectrum data.")
+                    # Option: Replace non-finite with 0 or SAT_THRESH?
+                    # y = np.nan_to_num(y, nan=0.0, posinf=app.SAT_THRESH, neginf=0.0)
+                    # For now, we'll proceed and let clip handle large numbers
 
-            # Only adjust limits when NOT locked
-            if not app.live_limits_locked:
-                app.live_ax.set_xlim(0, max(10, len(x)-1))
-                # Use original y for ymax calculation to set appropriate limits,
-                # even if the peak is clipped visually.
-                ymax = np.nanmax(y) if y.size else 1.0
-                # Ensure ymax is slightly above the saturation threshold if data is saturated
-                limit_ymax = max(app.SAT_THRESH * 1.05, max(1000, ymax * 1.1))
-                app.live_ax.set_ylim(0, limit_ymax)
+                # 2. Clip saturated values for display
+                y_clipped = np.clip(y, 0, app.SAT_THRESH) # Clip bottom at 0 too
 
-            app.live_fig.canvas.draw_idle()
-        app.after(0, update)
+                # 3. Set the plot data with clipped values
+                app.live_line.set_data(x, y_clipped)
+
+                # 4. Handle axis limits carefully
+                if not app.live_limits_locked:
+                    app.live_ax.set_xlim(0, max(10, len(x)-1))
+
+                    # Calculate ymax based on *clipped* data to avoid issues with potential 'inf'
+                    # Add a small buffer above SAT_THRESH for visual clarity
+                    current_ymax = np.nanmax(y_clipped) if y_clipped.size > 0 else 1.0
+                    upper_limit = max(app.SAT_THRESH * 1.05, max(1000, current_ymax * 1.1))
+
+                    # Ensure the upper limit is finite
+                    if not np.isfinite(upper_limit):
+                        upper_limit = app.SAT_THRESH * 1.1 # Fallback limit
+
+                    app.live_ax.set_ylim(0, upper_limit)
+
+                # --- Refined Modification End ---
+
+                app.live_fig.canvas.draw_idle()
+
+            except Exception as e:
+                # Add error logging here if the plot update itself fails
+                print(f"Error updating live plot: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Check if app is still valid before scheduling update
+        # (Handles case where window is closed during operation)
+        try:
+            app.after(0, update)
+        except tk.TclError:
+            # Handle cases where the app/widget might be destroyed
+            pass
 
 
     def toggle_laser(self, tag: str, turn_on: bool):
