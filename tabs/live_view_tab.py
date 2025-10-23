@@ -193,14 +193,28 @@ def build(app):
 
 
     def _update_live_plot(self, x, y):
+        # The 'self' argument here might be incorrect as it's defined inside build(app)
+        # It should likely refer to 'app' or be removed if not needed.
+        # Assuming it should refer to the main app instance:
+        app = self # Or however the main app instance is accessed here.
+
         def update():
-            app.live_line.set_data(x, y)
+            # --- Modification Start ---
+            # Clip saturated values to the saturation threshold
+            y_clipped = np.clip(y, None, app.SAT_THRESH)
+            # --- Modification End ---
+
+            app.live_line.set_data(x, y_clipped) # Use the clipped data
 
             # Only adjust limits when NOT locked
             if not app.live_limits_locked:
                 app.live_ax.set_xlim(0, max(10, len(x)-1))
+                # Use original y for ymax calculation to set appropriate limits,
+                # even if the peak is clipped visually.
                 ymax = np.nanmax(y) if y.size else 1.0
-                app.live_ax.set_ylim(0, max(1000, ymax * 1.1))
+                # Ensure ymax is slightly above the saturation threshold if data is saturated
+                limit_ymax = max(app.SAT_THRESH * 1.05, max(1000, ymax * 1.1))
+                app.live_ax.set_ylim(0, limit_ymax)
 
             app.live_fig.canvas.draw_idle()
         app.after(0, update)
