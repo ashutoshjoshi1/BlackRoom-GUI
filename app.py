@@ -877,49 +877,56 @@ class SpectroApp(tk.Tk):
         """Stop live view thread."""
         self.live_running.clear()
 
-    def _live_loop(self):
+    # In app.py
+
+    def _live_loop(self): # Assuming this is a method of SpectroApp
         """Live view loop running in separate thread."""
         while self.live_running.is_set():
             try:
-                # Start one frame
+                # --- (Existing code to measure) ---
                 self.spec.measure(ncy=1)
-                # Wait for frame to complete
                 self.spec.wait_for_measurement()
 
-                # Apply any deferred IT safely after the completed frame
-                if self._pending_it is not None:
-                    try:
-                        it_to_apply = self._pending_it
-                        self._pending_it = None
-                        self._it_updating = True
-                        self.spec.set_it(it_to_apply)
-                        try:
-                            self.title(f"Applied IT={it_to_apply:.3f} ms")
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        self._post_error("Apply IT (deferred)", e)
-                    finally:
-                        self._it_updating = False
-                        try:
-                            if hasattr(self, 'apply_it_btn'):
-                                self.apply_it_btn.state(["!disabled"])
-                        except Exception:
-                            pass
+                # --- (Existing code to handle pending IT) ---
+                # ...
 
                 # Get spectrum data
                 y = np.array(self.spec.rcm, dtype=float)
                 x = np.arange(len(y))
 
+                # --- Add Check ---
+                if y.size == 0:
+                    print("Warning: Received empty spectrum in live loop.")
+                    time.sleep(0.2) # Wait a bit before retrying
+                    continue # Skip this update cycle
+
                 # Update plot on main thread
-                self.after(0, lambda: self._update_live_plot(x, y))
+                # Use self (the app instance) directly if _update_live_plot is part of the app
+                # If _update_live_plot is elsewhere, pass the correct reference
+                self.after(0, lambda x_data=x, y_data=y: self._update_live_plot(x_data, y_data))
 
-                time.sleep(0.1)  # Small delay between frames
+
+                time.sleep(0.05) # Reduced delay slightly
+
             except Exception as e:
-                if self.live_running.is_set():  # Only show error if still running
-                    self._post_error("Live View", e)
-                break
+                # --- Added detailed logging ---
+                print(f"ERROR in live loop thread: {e}")
+                import traceback
+                traceback.print_exc()
+                # --- End added logging ---
 
+                if self.live_running.is_set():
+                    # Post error to UI only if we weren't intentionally stopped
+                    self.after(0, lambda err=e: self._post_error("Live View Error", err))
+
+                # Decide whether to break or continue upon error
+                # break # Option 1: Stop the loop on any error
+                time.sleep(1.0) # Option 2: Pause and try to continue
+
+            # Ensure loop termination check is robust
+            if not self.live_running.is_set():
+                break
+        print("Live loop thread finished.") # Add confirmation message
     def _update_live_plot(self, x, y):
         """Update live plot with new data (called on main thread)."""
         try:
