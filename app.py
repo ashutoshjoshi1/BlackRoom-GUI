@@ -932,12 +932,22 @@ class SpectroApp(tk.Tk):
                 if y.size == 0:
                     print("Warning: Live loop received empty spectrum data (y.size == 0). Skipping frame.")
                     data_valid = False
-                elif not np.all(np.isfinite(y)):
-                    print(f"Warning: Live loop received non-finite values (NaN/inf) in spectrum data. Max raw value: {np.nanmax(y)}. Skipping frame.")
-                    # Optional: Log the first few non-finite values
-                    # non_finite_indices = np.where(~np.isfinite(y))[0]
-                    # print(f"   Indices: {non_finite_indices[:5]}")
-                    data_valid = False
+                
+                # =================== FIX START ===================
+                # We remove the 'elif not np.all(np.isfinite(y))' check here.
+                # The _update_live_plot function is already designed to
+                # handle NaN or Inf values by cleaning and clipping them.
+                # Removing this check ensures the plot update is always
+                # called, allowing the flattening logic to work.
+                
+                # OLD CODE TO REMOVE:
+                # elif not np.all(np.isfinite(y)):
+                #    print(f"Warning: Live loop received non-finite values (NaN/inf) in spectrum data. Max raw value: {np.nanmax(y)}. Skipping frame.")
+                #    # Optional: Log the first few non-finite values
+                #    # non_finite_indices = np.where(~np.isfinite(y))[0]
+                #    # print(f"   Indices: {non_finite_indices[:5]}")
+                #    data_valid = False
+                # ===================  FIX END  ===================
 
                 # 6. Schedule plot update ONLY if data is valid
                 if data_valid:
@@ -992,7 +1002,6 @@ class SpectroApp(tk.Tk):
                 break
 
         print("Live loop thread finished.") # Debug end
-
     def _update_live_plot(self, x, y):
         # Use the latest version of _update_live_plot provided previously
         # which includes nan_to_num, clipping, and robust limit setting.
