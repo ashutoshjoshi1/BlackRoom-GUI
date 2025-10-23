@@ -9,7 +9,8 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
+import numpy as np # Ensure numpy is imported
+import sys
 import pandas as pd
 
 import tkinter as tk
@@ -879,66 +880,190 @@ class SpectroApp(tk.Tk):
 
     # In app.py
 
-    def _live_loop(self): # Assuming this is a method of SpectroApp
+    def _live_loop(self):
         """Live view loop running in separate thread."""
+        print("Live loop thread started.") # Debug start
         while self.live_running.is_set():
+            frame_start_time = time.monotonic() # For timing
             try:
-                # --- (Existing code to measure) ---
+                # 1. Check if spectrometer object exists
+                if self.spec is None:
+                    print("Live loop: Spectrometer not connected.")
+                    time.sleep(1.0) # Wait before checking again
+                    continue
+
+                # 2. Acquire measurement
                 self.spec.measure(ncy=1)
                 self.spec.wait_for_measurement()
 
-                # --- (Existing code to handle pending IT) ---
-                # ...
+                # 3. Handle pending IT changes (if any)
+                if self._pending_it is not None and not self._it_updating:
+                    try:
+                        it_to_apply = self._pending_it
+                        self._pending_it = None
+                        self._it_updating = True
+                        print(f"Live loop: Applying deferred IT={it_to_apply:.3f} ms")
+                        self.spec.set_it(it_to_apply)
+                        # Update title from main thread
+                        self.after(0, lambda it=it_to_apply: self.title(f"Applied IT={it:.3f} ms"))
+                    except Exception as e_it:
+                        print(f"Error applying deferred IT: {e_it}")
+                        self.after(0, lambda err=e_it: self._post_error("Apply IT (deferred)", err))
+                    finally:
+                        self._it_updating = False
+                        # Re-enable button from main thread
+                        self.after(0, lambda: self.apply_it_btn.state(["!disabled"]) if hasattr(self, 'apply_it_btn') else None)
 
-                # Get spectrum data
-                y = np.array(self.spec.rcm, dtype=float)
-                x = np.arange(len(y))
+                # 4. Get spectrum data
+                # --- Modification Start ---
+                try:
+                    # Access the raw data container from the spectrometer object
+                    raw_data = self.spec.rcm
+                    # Explicitly convert to a numpy float array
+                    y = np.array(raw_data, dtype=float)
+                except Exception as e_get_data:
+                    print(f"Error getting data from self.spec.rcm: {e_get_data}")
+                    y = np.array([]) # Create an empty array on error
 
-                # --- Add Check ---
+                x = np.arange(len(y)) # Create x based on y's actual length
+
+                # 5. Validate the data BEFORE plotting
+                data_valid = True
                 if y.size == 0:
-                    print("Warning: Received empty spectrum in live loop.")
-                    time.sleep(0.2) # Wait a bit before retrying
-                    continue # Skip this update cycle
+                    print("Warning: Live loop received empty spectrum data (y.size == 0). Skipping frame.")
+                    data_valid = False
+                elif not np.all(np.isfinite(y)):
+                    print(f"Warning: Live loop received non-finite values (NaN/inf) in spectrum data. Max raw value: {np.nanmax(y)}. Skipping frame.")
+                    # Optional: Log the first few non-finite values
+                    # non_finite_indices = np.where(~np.isfinite(y))[0]
+                    # print(f"   Indices: {non_finite_indices[:5]}")
+                    data_valid = False
 
-                # Update plot on main thread
-                # Use self (the app instance) directly if _update_live_plot is part of the app
-                # If _update_live_plot is elsewhere, pass the correct reference
-                self.after(0, lambda x_data=x, y_data=y: self._update_live_plot(x_data, y_data))
+                # 6. Schedule plot update ONLY if data is valid
+                if data_valid:
+                     # Check if the app window still exists before scheduling
+                    try:
+                        if self.winfo_exists():
+                             # Use lambda to capture current x and y values
+                            self.after(0, lambda x_data=x.copy(), y_data=y.copy(): self._update_live_plot(x_data, y_data))
+                        # else: print("Live loop: App window closed, skipping plot schedule.") # Debug noise
+                    except tk.TclError:
+                        # Handles race condition if window is destroyed between check and after()
+                        print("Live loop: TclError scheduling plot update (app likely closed).")
+                        self.live_running.clear() # Stop the loop if UI is gone
+                    except Exception as e_schedule:
+                        print(f"Live loop: Unexpected error scheduling plot update: {e_schedule}")
+                        traceback.print_exc()
+                # --- Modification End ---
 
+                # Calculate loop duration and sleep accordingly for smoother updates
+                frame_end_time = time.monotonic()
+                duration = frame_end_time - frame_start_time
+                # Aim for roughly 10 FPS, adjust sleep time dynamically
+                target_delay = 0.1 # seconds
+                sleep_time = max(0.01, target_delay - duration) # Ensure minimum sleep
+                time.sleep(sleep_time)
 
-                time.sleep(0.05) # Reduced delay slightly
+            except AttributeError as ae:
+                 # Catch errors if self.spec becomes None unexpectedly
+                 if "'NoneType' object has no attribute" in str(ae):
+                     print("Live loop: Spectrometer object became None. Was it disconnected?")
+                     self.spec = None # Ensure state consistency
+                     self.after(0, lambda: self.spec_status.config(text="Disconnected", foreground="red") if hasattr(self, 'spec_status') else None)
+                     time.sleep(1.0)
+                 else:
+                     print(f"Live loop AttributeError: {ae}")
+                     traceback.print_exc()
+                     time.sleep(1.0) # Pause before retrying
 
             except Exception as e:
-                # --- Added detailed logging ---
-                print(f"ERROR in live loop thread: {e}")
-                import traceback
-                traceback.print_exc()
-                # --- End added logging ---
-
+                # General error handling for the loop
+                print(f"ERROR in live loop thread: {type(e).__name__}: {e}")
+                traceback.print_exc(file=sys.stderr)
                 if self.live_running.is_set():
-                    # Post error to UI only if we weren't intentionally stopped
+                    # Post non-attribute errors to UI if still running
                     self.after(0, lambda err=e: self._post_error("Live View Error", err))
-
-                # Decide whether to break or continue upon error
-                # break # Option 1: Stop the loop on any error
+                # Decide recovery action
+                # break # Option 1: Stop loop on error
                 time.sleep(1.0) # Option 2: Pause and try to continue
 
-            # Ensure loop termination check is robust
+            # Final check to ensure loop terminates if flag is cleared
             if not self.live_running.is_set():
                 break
-        print("Live loop thread finished.") # Add confirmation message
+
+        print("Live loop thread finished.") # Debug end
+
     def _update_live_plot(self, x, y):
-        """Update live plot with new data (called on main thread)."""
+        # Use the latest version of _update_live_plot provided previously
+        # which includes nan_to_num, clipping, and robust limit setting.
+        # Make sure it uses `self.` correctly to access app attributes.
+
+        # (Paste the refined _update_live_plot code from the previous response here,
+        # ensuring it's properly indented as a method of SpectroApp)
+
+        # Example structure:
+        app = self # Because this is a method of SpectroApp now
+
+        def update():
+            # Check if essential UI elements still exist
+            if not hasattr(app, 'live_ax') or not hasattr(app, 'live_line') or not hasattr(app, 'live_fig'):
+                 # print("Live plot UI elements missing, skipping update.")
+                 return
+            # ... (rest of the robust plotting code from previous answer) ...
+            try:
+                # ... plotting logic ...
+                # 1. Validate incoming data (redundant check, but safe)
+                if y is None or x is None or y.size == 0 or x.size != y.size:
+                    return
+
+                # Replace non-finite values
+                y_cleaned = np.nan_to_num(y, nan=0.0, posinf=app.SAT_THRESH + 1, neginf=0.0)
+
+                # 2. Clip data for display
+                y_clipped = np.clip(y_cleaned, 0, app.SAT_THRESH)
+
+                # 3. Update plot data
+                app.live_line.set_data(x, y_clipped)
+                if not app.live_line.get_visible():
+                    app.live_line.set_visible(True)
+
+
+                # 4. Handle axis limits
+                if not app.live_limits_locked:
+                    try:
+                        x_min, x_max = 0, max(10, len(x)-1)
+                        if np.isfinite(x_min) and np.isfinite(x_max) and x_max > x_min:
+                            app.live_ax.set_xlim(x_min, x_max)
+
+                        y_min = 0
+                        current_ymax = np.max(y_clipped) if y_clipped.size > 0 else 1.0
+                        upper_limit = max(app.SAT_THRESH * 1.05, max(1000, current_ymax * 1.1))
+
+                        if np.isfinite(y_min) and np.isfinite(upper_limit) and upper_limit > y_min:
+                            app.live_ax.set_ylim(y_min, upper_limit)
+                        else:
+                            app.live_ax.set_ylim(0, app.SAT_THRESH * 1.1)
+
+                    except Exception as lim_e:
+                        print(f"Error setting axis limits: {lim_e}")
+                        try:
+                             app.live_ax.set_ylim(0, app.SAT_THRESH * 1.1)
+                        except Exception: pass # Ignore fallback error
+
+                # 5. Redraw canvas
+                app.live_fig.canvas.draw_idle()
+
+            except Exception as e:
+                print(f"ERROR during plot update: {e}")
+                traceback.print_exc()
+        # Schedule the update safely
         try:
-            if hasattr(self, 'live_line') and hasattr(self, 'live_ax'):
-                self.live_line.set_data(x, y)
-                if not getattr(self, 'live_limits_locked', False):
-                    self.live_ax.relim()
-                    self.live_ax.autoscale()
-                if hasattr(self, 'live_fig'):
-                    self.live_fig.canvas.draw_idle()
-        except Exception:
-            pass  # Ignore plot update errors
+            if app.winfo_exists():
+                 app.after(0, update)
+        except tk.TclError:
+             pass # App closed
+        except Exception as e:
+             print(f"Unexpected error scheduling plot update: {e}")
 
     # ------------------ Laser Control ------------------
     def toggle_laser(self, tag: str, turn_on: bool):
